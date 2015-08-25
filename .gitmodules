@@ -1,0 +1,6 @@
+[submodule "test/ex_clib"]
+	path = test/ex_clib
+	url = https://wuhong1986@github.com/wuhong1986/ex_clib
+[submodule "test/cstl"]
+	path = test/cstl
+	url = https://wuhong1986@github.com/wuhong1986/cstl
