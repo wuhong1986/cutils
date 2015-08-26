@@ -25,18 +25,8 @@
 #endif
 
 #include "cstring.h"
-
-/*
- * Command struct.
- */
-
-struct cli_cmd;
-
-/*
- * Option callback.
- */
-
-typedef void (*cli_cmd_callback_t)(struct cli_cmd *self);
+#include "chash.h"
+#include "cvector.h"
 
 /*
  * Command option.
@@ -50,13 +40,11 @@ typedef struct {
   const char *small;
   const char *large_with_arg;
   const char *description;
-  cli_cmd_callback_t cb;
 } cli_cmd_opt_t;
 
 /*
  * Command.
  */
-
 typedef struct cli_cmd {
   void *data;
   const char *usage;
@@ -68,6 +56,8 @@ typedef struct cli_cmd {
   int argc;
   char *argv[COMMANDER_MAX_ARGS];
   char **nargv;
+  chash     *opts;
+  cvector   *args;
 } cli_cmd_t;
 
 // prototypes
@@ -75,7 +65,7 @@ typedef struct cli_cmd {
 void command_init(cli_cmd_t *self, const char *name, const char *version);
 void command_free(cli_cmd_t *self);
 void command_help(cli_cmd_t *self);
-void command_option(cli_cmd_t *self, const char *small, const char *large, const char *desc, cli_cmd_callback_t cb);
+void command_option(cli_cmd_t *self, const char *small, const char *large, const char *desc);
 void command_parse(cli_cmd_t *self, int argc, char **argv);
 
 #endif /* COMMANDER_H */

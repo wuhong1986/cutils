@@ -9,7 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include "commander.h"
+#include "cli_command.h"
+#include "cobj_str.h"
 
 /*
  * Output error and exit.
@@ -26,8 +27,6 @@ static void error(const char *msg) {
 
 static void command_version(cli_cmd_t *self) {
   printf("%s\n", self->version);
-  command_free(self);
-  exit(0);
 }
 
 /*
@@ -51,8 +50,6 @@ void command_help(cli_cmd_t *self) {
   }
 
   printf("\n");
-  command_free(self);
-  exit(0);
 }
 
 /*
@@ -66,8 +63,10 @@ void command_init(cli_cmd_t *self, const char *name, const char *version) {
   self->option_count = self->argc = 0;
   self->usage = "[options]";
   self->nargv = NULL;
-  command_option(self, "-V", "--version", "output program version", command_version);
-  command_option(self, "-h", "--help", "output help information", command_help);
+  self->opts  = chash_new();
+  self->args  = cvector_new();
+  command_option(self, "-V", "--version", "output program version");
+  command_option(self, "-h", "--help", "output help information");
 }
 
 /*
@@ -89,6 +88,9 @@ void command_free(cli_cmd_t *self) {
     }
     free(self->nargv);
   }
+
+  chash_free(self->opts);
+  cvector_free(self->args);
 }
 
 /*
@@ -129,7 +131,7 @@ normalize_args(int *argc, char **argv) {
   int size = 0;
   int alloc = *argc + 1;
   char **nargv = malloc(alloc * sizeof(char *));
-  int i;
+  int i, j;
 
   for (i = 0; argv[i]; ++i) {
     const char *arg = argv[i];
@@ -139,7 +141,7 @@ normalize_args(int *argc, char **argv) {
     if (len > 2 && '-' == arg[0] && !strchr(arg + 1, '-')) {
       alloc += len - 2;
       nargv = realloc(nargv, alloc * sizeof(char *));
-      for (size_t j = 1; j < len; ++j) {
+      for (j = 1; j < len; ++j) {
         nargv[size] = malloc(3);
         sprintf(nargv[size], "-%c", arg[j]);
         size++;
@@ -163,14 +165,13 @@ normalize_args(int *argc, char **argv) {
  */
 
 void
-command_option(cli_cmd_t *self, const char *small, const char *large, const char *desc, cli_cmd_callback_t cb) {
+command_option(cli_cmd_t *self, const char *small, const char *large, const char *desc) {
   if (self->option_count == COMMANDER_MAX_OPTIONS) {
     command_free(self);
     error("Maximum option definitions exceeded");
   }
   int n = self->option_count++;
   cli_cmd_opt_t *option = &self->options[n];
-  option->cb = cb;
   option->small = small;
   option->description = desc;
   option->required_arg = option->optional_arg = 0;
@@ -191,11 +192,15 @@ command_option(cli_cmd_t *self, const char *small, const char *large, const char
  */
 
 static void command_parse_args(cli_cmd_t *self, int argc, char **argv) {
+    const char *arg = NULL;
+    const char *val = NULL;;
   int literal = 0;
   int i, j;
 
   for (i = 1; i < argc; ++i) {
-    const char *arg = argv[i];
+    arg = argv[i];
+    val = NULL;
+    printf("*** argv[%d]:%s\n", i, argv[i]);
     for (j = 0; j < self->option_count; ++j) {
       cli_cmd_opt_t *option = &self->options[j];
 
@@ -205,21 +210,25 @@ static void command_parse_args(cli_cmd_t *self, int argc, char **argv) {
 
         // required
         if (option->required_arg) {
-          arg = argv[++i];
-          if (!arg || '-' == arg[0]) {
+            val = (i < argc - 1) ? argv[++i] : NULL;
+          if (!val || '-' == val[0]) {
             fprintf(stderr, "%s %s argument required\n", option->large, option->argname);
             command_free(self);
             exit(1);
           }
-          self->arg = arg;
+          self->arg = val;
         }
 
         // optional
-        if (option->optional_arg) {
+        if (option->optional_arg && i < argc - 1) {
           if (argv[i + 1] && '-' != argv[i + 1][0]) {
-            self->arg = argv[++i];
+              val = argv[++i];
+            self->arg = val;
           }
         }
+
+        chash_str_str_set(self->opts, arg, val);
+        chash_printf(self->opts, stdout);
 
         // invoke callback
         option->cb(self);
@@ -246,6 +255,8 @@ static void command_parse_args(cli_cmd_t *self, int argc, char **argv) {
       error("Maximum number of arguments exceeded");
     }
     self->argv[n] = (char *) arg;
+    cvector_append(self->args, cobj_str_new(arg));
+    cvector_print(self->args);
     match:;
   }
 }

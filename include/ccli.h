@@ -17,8 +17,10 @@ extern "C" {
 #include <stdbool.h>
 #include "cstring.h"
 #include "cobj.h"
+#include "chash.h"
+#include "cvector.h"
 
-typedef struct cli_arg_s cli_arg_t;
+typedef struct cli_cmd cli_cmd_t;
 /**
  * @Brief  CLI命令的回调函数
  *
@@ -27,7 +29,21 @@ typedef struct cli_arg_s cli_arg_t;
  * @Param result_buf 处理完该命令后的返回的打印信息
  * @Param buf_len    返回的信息长度
  */
-typedef void (*callback_cli)(const cli_arg_t *arg, cstr *cli_str);
+typedef void (*cli_cmd_callback_t)(cli_cmd_t *cmd);
+
+typedef struct {
+    COBJ_HEAD_VARS;
+
+    int optional_arg;
+    int required_arg;
+    char *argname;
+    char *large;
+    const char *small;
+    const char *large_with_arg;
+    const char *description;
+
+    cli_cmd_callback_t cb;
+} cli_opt_t;
 
 /**
  * @Brief  CLI命令结构体
@@ -36,14 +52,32 @@ typedef struct cli_s
 {
     COBJ_HEAD_VARS;
 
-    bool is_used;   /* 是否已经使用 */
-    bool is_help;   /* 是否是帮助命令 */
-    const char  *cmd;       /* 命令名称 */
-    const char  *brief;     /* 该命令的概要说明 */
-    const char  *help;      /* 该命令的帮助信息，使用说明 */
-    callback_cli cb;        /* 该命令的回调函数 */
+    const char *name;
+    const char *alias;
+    const char *desc;
+    const char *usage;
+    const char *version;
+
+    cvector *options;
+    // int option_count;
+    // cli_cmd_opt_t options[COMMANDER_MAX_OPTIONS];
+
+    cli_cmd_callback_t cb;
 }cli_t;
 
+struct cli_cmd{
+    cli_t   *cli;
+    bool    is_finished;
+    bool    is_error;
+
+    char **nargv;
+
+    chash   *opts;
+    cvector *args;
+    cstr    *output;
+} ;
+
+#if 0
 /* ==========================================================================
  *        cli argument interface
  * ======================================================================= */
@@ -95,6 +129,7 @@ float cli_arg_get_float(const cli_arg_t *arg, uint32_t idx, float def);
  */
 void cli_arg_remove(cli_arg_t *arg, uint32_t idx);
 void cli_arg_remove_first(cli_arg_t *arg);
+#endif
 
 /* ===============================================================================
  *          cli interfaces
@@ -114,13 +149,16 @@ void  cli_release(void);
 /**
  * @Brief  注册普通CLI命令
  *
- * @Param cmd   命令名称，即用户输入的命令
+ * @Param name  命令名称，即用户输入的命令
  * @Param func  处理该命令的回调函数
  * @Param brief 命令的概要
  * @Param help  该命令的帮助信息
  */
-void  cli_regist(const char *cmd,   callback_cli func,
-                 const char *brief, const char *help);
+cli_t* cli_regist(const char *name, cli_cmd_callback_t func);
+
+void cli_add_option(cli_t *cli,        const char *small,
+                    const char *large, const char *desc,
+                    cli_cmd_callback_t cb);
 
 cstr* cli_get_welcome_str(void);
 cstr* cli_get_prompt_str(void);
@@ -136,7 +174,7 @@ void cli_loop(void);
  *                   调用程序在使用完result_buf后需要显示调用free释放内存
  * @Param buf_len    返回内容的长度
  */
-void cli_parse(const char *cmd_line, cstr *cli_str);
+void cli_parse(cli_cmd_t *cmd, char *cmd_line);
 
 /**
  * @Brief  是否退出程序

@@ -13,31 +13,32 @@
 #include <string.h>
 #include <errno.h>
 #include "clist.h"
-#include "cdefine.h"
 #include "ex_file.h"
-#include "ex_memory.h"
+#include "ex_string.h"
 #include "ccli.h"
 #include "cobj_str.h"
 
 cobj_ops_t cobj_ops_cli = {
-    "cli",
-    sizeof(cli_t),
-    false,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    OBJ_CB_MEMSIZE_NULL,
+    .name = "cli",
+    .obj_size = sizeof(cli_t),
 };
 
-struct cli_arg_s
+void cli_opt_destroy(void *obj)
 {
-    clist *argv;
+    cli_opt_t *opt = (cli_opt_t*)obj;
+
+    free(opt->argname);
+    free(opt->large);
+}
+
+cobj_ops_t cobj_ops_cli_opt = {
+    .name = "cli_opt",
+    .obj_size = sizeof(cli_opt_t),
+    .cb_destructor = cli_opt_destroy,
 };
 
 static bool  g_is_quit = false;
-static clist *g_list   = NULL;
+static chash *g_clis   = NULL;
 static cstr  *g_str_welcome = NULL; /* 欢迎信息 */
 static cstr  *g_str_prompt  = NULL;
 
@@ -46,12 +47,13 @@ bool cli_is_quit(void)
     return g_is_quit;
 }
 
+#if 0
 /* ==========================================================================
  *        cli argument interface
  * ======================================================================= */
 static cli_arg_t *cli_arg_new(void)
 {
-    cli_arg_t *arg = ex_malloc_one(cli_arg_t);
+    cli_arg_t *arg = (cli_arg_t*)malloc(sizeof(cli_arg_t));
 
     arg->argv = clist_new();
 
@@ -72,7 +74,7 @@ uint32_t cli_arg_cnt(const cli_arg_t *arg)
 static void cli_arg_add(cli_arg_t *arg, const char *str)
 {
     cobj_str *obj = cobj_str_new(str);
-    clist_append(arg->argv, CAST_TO_COBJ(obj));
+    clist_append(arg->argv, obj);
 }
 
 static const char* cli_arg_get(const cli_arg_t *arg, uint32_t idx)
@@ -134,27 +136,36 @@ void cli_arg_remove_first(cli_arg_t *arg)
 {
     cli_arg_remove(arg, 0);
 }
+#endif
 
-/**
- * @Brief  根据命令名称cmd查找保存在clis中对应的CLI命令
- *
- * @Param cmd  要查找的命令名称
- *
- * @Returns     NULL: 没有找到
- *              否则返回对应的CLI
- */
-static const cli_t* find_cli(const char *cmd)
+void cli_cmd_init(cli_cmd_t *cmd)
 {
-    clist_iter iter = clist_begin(g_list);
-    cli_t      *cli     = NULL;
+    cmd->cli         = NULL;
+    cmd->is_finished = false;
+    cmd->is_error    = false;
+    cmd->opts        = chash_new();
+    cmd->args        = cvector_new();
+    cmd->output      = cstr_new();
+}
 
-    clist_iter_foreach_obj(&iter, cli){
-        if(strcmp(cli->cmd, cmd) == 0){ /*  find it */
-            return cli;
-        }
-    }
+void cli_cmd_release(cli_cmd_t *cmd)
+{
+    cmd->cli         = NULL;
+    cmd->is_finished = false;
+    cmd->is_error    = false;
+    chash_free(cmd->opts);
+    cvector_free(cmd->args);
+    cstr_free(cmd->output);
+}
 
-    return NULL;
+void cli_cmd_clear(cli_cmd_t *cmd)
+{
+    cmd->cli         = NULL;
+    cmd->is_finished = false;
+    cmd->is_error    = false;
+    chash_clear(cmd->opts);
+    cvector_clear(cmd->args);
+    cstr_clear(cmd->output);
 }
 
 /**
@@ -168,16 +179,16 @@ static const cli_t* find_cli(const char *cmd)
  *
  * @Returns
  */
-static void cli_process(const char *cmd, const cli_arg_t *arg, cstr *cli_str)
+static void cli_process(cli_cmd_t *cmd)
 {
-    const cli_t   *cli = NULL;
+    const cli_t *cli = cmd->cli;
 
-    /*  找到对应的命令处理函数 */
-    cli = find_cli(cmd);
-    if(NULL == cli || NULL == cli->cb)  {
-        cstr_append(cli_str, "No such command!\n");
+    if(cli && cli->cb) {
+        cli->cb(cmd);
+    } else if(!cli) {
+        cstr_append(cmd->output, "No such command!\n");
     } else {
-        cli->cb(arg, cli_str);
+        cstr_append(cmd->output, "Undefine command callback!\n");
     }
 }
 
@@ -240,20 +251,148 @@ void cli_welcome(void)
 void cli_loop(void)
 {
     char  cli_input[256] = {0};
-    cstr *cli_str = NULL;
+    cli_cmd_t cmd;
 
-    cli_str = cstr_new();
+    cli_cmd_init(&cmd);
+
     while(!cli_is_quit()){
         printf("%s", cstr_body(g_str_prompt));
 
-        ex_memzero(cli_input, sizeof(cli_input));
+        memset(cli_input, 0, sizeof(cli_input));
         fgets(cli_input, sizeof(cli_input), stdin);
 
-        cli_parse(cli_input, cli_str);
-        printf("%s", cstr_body(cli_str));
-        cstr_clear(cli_str);
+        cli_parse(&cmd, cli_input);
+        printf("%s", cstr_body(cmd.output));
+        cli_cmd_clear(&cmd);
 	}
-    cstr_free(cli_str);
+    cli_cmd_release(&cmd);
+}
+
+/*
+ * Normalize the argument vector by exploding
+ * multiple options (if any). For example
+ * "foo -abc --scm git" -> "foo -a -b -c --scm git"
+ */
+
+static char ** normalize_args(int *argc, char **argv)
+{
+  int size = 0;
+  int alloc = *argc + 1;
+  char **nargv = malloc(alloc * sizeof(char *));
+  int i, j;
+
+  for (i = 0; argv[i]; ++i) {
+    const char *arg = argv[i];
+    size_t len = strlen(arg);
+
+    // short flag
+    if (len > 2 && '-' == arg[0] && !strchr(arg + 1, '-')) {
+      alloc += len - 2;
+      nargv = realloc(nargv, alloc * sizeof(char *));
+      for (j = 1; j < len; ++j) {
+        nargv[size] = malloc(3);
+        sprintf(nargv[size], "-%c", arg[j]);
+        size++;
+      }
+      continue;
+    }
+
+    // regular arg
+    nargv[size] = malloc(len + 1);
+    strcpy(nargv[size], arg);
+    size++;
+  }
+
+  nargv[size] = NULL;
+  *argc = size;
+  return nargv;
+}
+
+static void command_parse_args(cli_cmd_t *self, int argc, char **argv) {
+    const char *arg = NULL;
+    const char *val = NULL;;
+    cli_t *cli = self->cli;
+    int literal = 0;
+    int i, j;
+
+  for (i = 1; i < argc; ++i) {
+    arg = argv[i];
+    val = NULL;
+    /* printf("*** argv[%d]:%s\n", i, argv[i]); */
+    for (j = 0; j < cvector_size(cli->options); ++j) {
+      cli_opt_t *option = (cli_opt_t*)cvector_at(cli->options, j);
+
+      // match flag
+      if (!strcmp(arg, option->small) || !strcmp(arg, option->large)) {
+        // required
+        if (option->required_arg) {
+            val = (i < argc - 1) ? argv[++i] : NULL;
+          if (!val || '-' == val[0]) {
+                fprintf(stderr, "%s %s argument required\n", option->large, option->argname);
+                self->is_error = true;
+                return;
+          }
+        }
+
+        // optional
+        if (option->optional_arg && i < argc - 1) {
+          if (argv[i + 1] && '-' != argv[i + 1][0]) {
+              val = argv[++i];
+          }
+        }
+
+        if(option->cb) {
+            option->cb(self);
+            if(self->is_finished || self->is_error) {
+                return;
+            }
+        }
+
+        chash_str_str_set(self->opts, arg, val);
+        /* chash_printf(self->opts, stdout); */
+
+        goto match;
+      }
+    }
+
+    // --
+    if ('-' == arg[0] && '-' == arg[1] && 0 == arg[2]) {
+      literal = 1;
+      goto match;
+    }
+
+    // unrecognized
+    if ('-' == arg[0] && !literal) {
+        fprintf(stderr, "unrecognized flag %s\n", arg);
+        self->is_error = true;
+        return;
+    }
+
+    cvector_append(self->args, cobj_str_new(arg));
+    /* cvector_print(self->args); */
+    match:;
+  }
+}
+
+/*
+ * Parse `argv` (public).
+ */
+
+void command_parse(cli_cmd_t *self, int argc, char **argv)
+{
+    const char *name = argv[0];
+    char **nargv = NULL;
+    int i = 0;
+
+    self->cli  = (cli_t*)chash_str_get(g_clis, name);
+    nargv = normalize_args(&argc, argv);
+    command_parse_args(self, argc, nargv);
+    /* self->argv[self->argc] = NULL; */
+
+    for(i = 0; i < argc; ++i) {
+        free(nargv[i]);
+    }
+    free(nargv);
 }
 
 /**
@@ -268,79 +407,55 @@ void cli_loop(void)
  * @Returns   STATUS_OK 为处理该命令正常
  *            其他值为对应的错误状态码
  */
-void cli_parse(const char *cmd_line, cstr *cli_str)
+void cli_parse(cli_cmd_t *cmd, char *cmd_line)
 {
-    char  *cmd  = NULL;
-    char  *str  = NULL;
-    cli_arg_t *arg = NULL;
-    uint32_t cmd_len       = 0;
-    uint32_t cmd_line_len  = 0;
-    uint32_t arg_idx       = 0;
-    uint32_t arg_len       = 0;
-    uint32_t arg_pos_start = 0;
-    uint32_t arg_pos_end   = 0;
-    uint32_t i             = 0;
-    uint32_t j             = 0;
+    int argc = 0;
+    char **argv = NULL;
 
     if(true == is_blank_line(cmd_line)) return;
 
-    cmd_line_len = strlen(cmd_line);
-    for (i = 0; i < cmd_line_len; i++) {
-        if(true == is_arg_split(cmd_line[i])) {
-            cmd_len = i;
-            break;
-        }
+    ex_str_trim(cmd_line);
+    argc = ex_str_split(cmd_line, "\t\n\r ", &argv);
+
+    command_parse(cmd, argc, argv);
+
+    if(!cmd->is_finished && !cmd->is_error){
+        cli_process(cmd);
+    }
+}
+
+/*
+ * Output command version.
+ */
+
+static void command_version(cli_cmd_t *self) {
+  printf("Version: %s\n", self->cli->version);
+  self->is_finished = true;
+}
+
+/*
+ * Output command help.
+ */
+
+void command_help(cli_cmd_t *self) {
+    cli_t *cli = self->cli;
+
+    printf("\n");
+    printf("  Usage: %s %s\n", cli->name, cli->usage);
+    printf("\n");
+    printf("  Options:\n");
+    printf("\n");
+
+    int i;
+    for (i = 0; i < cvector_size(cli->options); ++i) {
+        cli_opt_t *option = (cli_opt_t*)cvector_at(cli->options, i);
+        printf("    %s, %-25s %s\n" , option->small ,
+                                      option->large_with_arg ,
+                                      option->description);
     }
 
-    cmd = ex_malloc(char, cmd_len + 1);     /*  +1 是给'\0'分配的 */
-    memcpy(cmd, cmd_line, cmd_len);
-    cmd[cmd_len] = '\0';
-
-    arg  = cli_arg_new();
-
-    /*  再解析一次，这次获取具体的参数值 */
-    for (i = cmd_len; i < cmd_line_len; ) {
-        /*  当前的字符是分割字符，但是还需要判断下一个字符，比如2个空格的情况 */
-        if( true == is_arg_split(cmd_line[i])
-        && (i + 1 < cmd_line_len)
-        && false == is_arg_split(cmd_line[i + 1])) { /* 下一个字符不是分割字符，
-                                                        则参数+1 */
-            /*  已经进入参数的起始位置，获取参数的长度 */
-            arg_pos_start = i + 1;
-            for (j = arg_pos_start + 1; j < cmd_line_len; j++) {
-                if(true == is_arg_split(cmd_line[j])){ /*  参数结束了 */
-                    arg_pos_end = j;
-                }
-                else if(j == cmd_line_len - 1){ /*  已经是最后一个字符类，也认为是结束了 */
-                    arg_pos_end = cmd_line_len;
-                }
-
-                if(arg_pos_end > arg_pos_start) { /*  找到参数了，计算长度，并跳出循环, 查找下一个参数 */
-                    arg_len = arg_pos_end - arg_pos_start;
-                    str     = ex_malloc(char, arg_len + 1);
-
-                    /*LoggerDebug("arg_len:%d, start:%d, end:%d", arg_len, arg_pos_start, arg_pos_end);*/
-                    /*  拷贝参数 */
-                    memcpy(str, &(cmd_line[arg_pos_start]), arg_len);
-                    str[arg_len] = '\0';
-
-                    cli_arg_add(arg, str);
-
-                    ++arg_idx;
-                    i = arg_pos_end;
-                    break;
-                }
-            }
-        } else {
-            ++i;
-        }
-    }
-
-    cli_process(cmd, arg, cli_str);
-
-    /*  处理完命令后， 释放之前分配的空间 */
-    ex_free(cmd);
-    cli_arg_free(arg);
+    printf("\n");
+    self->is_finished = true;
 }
 
 /**
@@ -354,38 +469,75 @@ void cli_parse(const char *cmd_line, cstr *cli_str)
  *
  * @Returns
  */
-void  cli_regist_cmd(const char *cmd, callback_cli cb,
-                 const char *brief, const char *help, bool is_help)
+cli_t*  cli_regist(const char *name, cli_cmd_callback_t cb)
 {
     cli_t *cli = (cli_t*)malloc(sizeof(cli_t));
 
-    cli->ops     = &cobj_ops_cli;
-    cli->is_help = is_help;
-    cli->cmd     = cmd;
+    cobj_set_ops(cli, &cobj_ops_cli);
+    cli->name    = name;
     cli->cb      = cb;
-    if(NULL != brief) cli->brief = brief;
-    else    cli->brief = "No brief.";
+    cli->alias   = NULL;
+    cli->desc    = "Undefined";
+    cli->usage   = "[options]";
+    cli->version = "1.0";
+    cli->options = cvector_new();
 
-    if(NULL != help)  cli->help = help;
-    else    cli->help = "No help.";
+    chash_str_set(g_clis, name, cli);
 
-    clist_append(g_list, CAST_TO_COBJ(cli));
+    cli_add_option(cli, "-V", "--version", "output program version", command_version);
+    cli_add_option(cli, "-h", "--help", "output help information", command_help);
+
+    return cli;
 }
 
-/**
- * @Brief  注册普通CLI命令
- *
- * @Param cmd   命令名称，即用户输入的命令
- * @Param func  处理该命令的回调函数
- * @Param brief 命令的概要
- * @Param help  该命令的帮助信息
- *
- * @Returns
+/*
+ * Parse argname from `str`. For example
+ * Take "--required <arg>" and populate `flag`
+ * with "--required" and `arg` with "<arg>".
  */
-void  cli_regist(const char *cmd, callback_cli func,
-                 const char *brief, const char *help)
+
+static void parse_argname(const char *str, char *flag, char *arg) {
+  int buffer = 0;
+  size_t flagpos = 0;
+  size_t argpos = 0;
+  size_t len = strlen(str);
+  size_t i;
+
+  for (i = 0; i < len; ++i) {
+    if (buffer || '[' == str[i] || '<' == str[i]) {
+      buffer = 1;
+      arg[argpos++] = str[i];
+    } else {
+      if (' ' == str[i]) continue;
+      flag[flagpos++] = str[i];
+    }
+  }
+
+  arg[argpos] = '\0';
+  flag[flagpos] = '\0';
+}
+
+void cli_add_option(cli_t *cli,        const char *small,
+                    const char *large, const char *desc,
+                    cli_cmd_callback_t cb)
 {
-    cli_regist_cmd(cmd, func, brief, help, false);
+
+  cli_opt_t *option = (cli_opt_t*)malloc(sizeof(cli_opt_t));
+
+  cobj_set_ops(option, &cobj_ops_cli_opt);
+
+  option->cb    = cb;
+  option->small = small;
+  option->description = desc;
+  option->required_arg = option->optional_arg = 0;
+  option->large_with_arg = large;
+  option->argname = malloc(strlen(large) + 1);
+  option->large = malloc(strlen(large) + 1);
+  parse_argname(large, option->large, option->argname);
+  if ('[' == option->argname[0]) option->optional_arg = 1;
+  if ('<' == option->argname[0]) option->required_arg = 1;
+
+  cvector_append(cli->options, option);
 }
 
 #if 0
@@ -410,6 +562,7 @@ static int    cli_remote_at_cmd(uint32_t argc, char **argv, cstr *cli_str)
 }
 #endif
 
+#if 0
 static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
 {
 #ifdef __linux__
@@ -444,7 +597,7 @@ static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
     }
 
     file_size = ex_file_size(temp_file) + 1;
-    strTemp = ex_malloc(char, file_size);
+    strTemp = (char*)malloc(file_size);
 
     /*  读取shell命令输出内容，并拷贝到缓存 */
     pfile = fopen(temp_file, "rb");
@@ -453,7 +606,7 @@ static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
     strTemp[read_cnt] = '\0';
     cstr_append(cli_str, "%s", strTemp);
 
-    ex_free(strTemp);
+    free(strTemp);
     ex_fclose(pfile);
 
     /*  删除保存结果临时文件 */
@@ -463,7 +616,6 @@ static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
         cstr_append(cli_str, "System cmd run failed:%s\n", strerror(errno));
     }
 #else
-    UNUSED(arg);
     cstr_append(cli_str, "Only Support Linux Platform\n");
 #endif
 }
@@ -480,8 +632,6 @@ static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
  */
 void cli_quit_fun(const cli_arg_t *arg, cstr *cli_str)
 {
-    UNUSED(arg);
-
     cstr_append(cli_str, "Bye...\n");
 
     g_is_quit = true;
@@ -499,7 +649,7 @@ void cli_quit_fun(const cli_arg_t *arg, cstr *cli_str)
  */
 void cli_help_fun(const cli_arg_t *arg, cstr *cli_str)
 {
-    clist_iter iter = clist_begin(g_list);
+    clist_iter iter = clist_begin(g_clis);
     const cli_t *cli  = NULL;
     uint32_t argc = cli_arg_cnt(arg);
 
@@ -539,37 +689,17 @@ void cli_help_fun(const cli_arg_t *arg, cstr *cli_str)
         }
     }
 }
-
-/**
- * @Brief  注册帮助命令
- *
- * @Param cmd 帮助命令的名称
- *
- * @Returns
- */
-static void cli_regist_help(const char *cmd)
-{
-    cli_regist_cmd(cmd, cli_help_fun, NULL, NULL, true);
-}
-
-/**
- * @Brief  注册退出命令
- *
- * @Param cmd
- *
- * @Returns
- */
-static void cli_regist_quit(const char *cmd)
-{
-    cli_regist_cmd(cmd, cli_quit_fun, "quit program.", "quit <CR>", false);
-}
+#endif
 
 void  cli_init(void)
 {
-    g_list        = clist_new();
+    g_clis        = chash_new();
     g_str_welcome = cstr_new();
     g_str_prompt  = cstr_new();
 
+    cstr_append(g_str_prompt, "#> ");
+
+#if 0
     cli_regist_help("help");
     cli_regist_help("?");
     cli_regist_quit("quit");
@@ -577,11 +707,12 @@ void  cli_init(void)
 
     cli_regist("shell"  , cli_shell,
               "run linux shell command." , "shell cmd<CR>");
+#endif
 }
 
 void  cli_release(void)
 {
     cstr_free(g_str_prompt);
     cstr_free(g_str_welcome);
-    clist_free(g_list);
+    chash_free(g_clis);
 }
