@@ -18,9 +18,17 @@
 #include "ccli.h"
 #include "cobj_str.h"
 
+void cli_destroy(void *obj)
+{
+    cli_t *cli = (cli_t*)obj;
+
+    cvector_free(cli->options);
+}
+
 cobj_ops_t cobj_ops_cli = {
     .name = "cli",
     .obj_size = sizeof(cli_t),
+    .cb_destructor = cli_destroy,
 };
 
 void cli_opt_destroy(void *obj)
@@ -38,6 +46,7 @@ cobj_ops_t cobj_ops_cli_opt = {
 };
 
 static bool  g_is_quit = false;
+static cli_quit_callback_t g_quit_cb = NULL;
 static chash *g_clis   = NULL;
 static cstr  *g_str_welcome = NULL; /* 欢迎信息 */
 static cstr  *g_str_prompt  = NULL;
@@ -45,6 +54,11 @@ static cstr  *g_str_prompt  = NULL;
 bool cli_is_quit(void)
 {
     return g_is_quit;
+}
+
+bool cli_set_quit_cb(cli_quit_callback_t cb)
+{
+    g_quit_cb = cb;
 }
 
 #if 0
@@ -193,19 +207,6 @@ static void cli_process(cli_cmd_t *cmd)
 }
 
 /**
- * @Brief  判断字符是否是参数分割符
- *
- * @Param ch
- *
- * @Returns
- */
-bool is_arg_split(char ch)
-{
-    if(' ' == ch || '\t' == ch || '\n' == ch || '\r' == ch) return true;
-    else return false;
-}
-
-/**
  * @Brief  判断当前输入行是否是空行
  *
  * @Param cmd_line
@@ -217,7 +218,7 @@ bool is_blank_line(const char *cmd_line)
     uint32_t i = 0;
 
     for (i = 0; i < strlen(cmd_line); i++) {
-        /*printf("char %c\n", cmd_line[i]);*/
+        /*cli_output(self, "char %c\n", cmd_line[i]);*/
         switch(cmd_line[i]){
             case '\t':
             case '\n':
@@ -281,7 +282,7 @@ static char ** normalize_args(int *argc, char **argv)
   char **nargv = malloc(alloc * sizeof(char *));
   int i, j;
 
-  for (i = 0; argv[i]; ++i) {
+  for (i = 0; i < *argc && argv[i]; ++i) {
     const char *arg = argv[i];
     size_t len = strlen(arg);
 
@@ -318,7 +319,7 @@ static void command_parse_args(cli_cmd_t *self, int argc, char **argv) {
   for (i = 1; i < argc; ++i) {
     arg = argv[i];
     val = NULL;
-    /* printf("*** argv[%d]:%s\n", i, argv[i]); */
+    /* cli_output(self, "*** argv[%d]:%s\n", i, argv[i]); */
     for (j = 0; j < cvector_size(cli->options); ++j) {
       cli_opt_t *option = (cli_opt_t*)cvector_at(cli->options, j);
 
@@ -328,7 +329,7 @@ static void command_parse_args(cli_cmd_t *self, int argc, char **argv) {
         if (option->required_arg) {
             val = (i < argc - 1) ? argv[++i] : NULL;
           if (!val || '-' == val[0]) {
-                fprintf(stderr, "%s %s argument required\n", option->large, option->argname);
+                cli_output(self, "%s %s argument required\n", option->large, option->argname);
                 self->is_error = true;
                 return;
           }
@@ -363,7 +364,7 @@ static void command_parse_args(cli_cmd_t *self, int argc, char **argv) {
 
     // unrecognized
     if ('-' == arg[0] && !literal) {
-        fprintf(stderr, "unrecognized flag %s\n", arg);
+        cli_output(self, "unrecognized flag %s\n", arg);
         self->is_error = true;
         return;
     }
@@ -385,14 +386,21 @@ void command_parse(cli_cmd_t *self, int argc, char **argv)
     int i = 0;
 
     self->cli  = (cli_t*)chash_str_get(g_clis, name);
-    nargv = normalize_args(&argc, argv);
-    command_parse_args(self, argc, nargv);
-    /* self->argv[self->argc] = NULL; */
-
-    for(i = 0; i < argc; ++i) {
-        free(nargv[i]);
+    /* find alias */
+    if(self->cli && self->cli->alias) {
+        self->cli = (cli_t*)chash_str_get(g_clis, self->cli->alias);
     }
-    free(nargv);
+
+    if(self->cli){
+
+        nargv = normalize_args(&argc, argv);
+        command_parse_args(self, argc, nargv);
+
+        for(i = 0; i < argc; ++i) {
+            free(nargv[i]);
+        }
+        free(nargv);
+    }
 }
 
 /**
@@ -415,46 +423,50 @@ void cli_parse(cli_cmd_t *cmd, char *cmd_line)
     if(true == is_blank_line(cmd_line)) return;
 
     ex_str_trim(cmd_line);
-    argc = ex_str_split(cmd_line, "\t\n\r ", &argv);
+    argc = ex_str_split_charset(cmd_line, "\t\n\r ", &argv);
 
     command_parse(cmd, argc, argv);
 
     if(!cmd->is_finished && !cmd->is_error){
         cli_process(cmd);
     }
+
+    ex_str_split_free(argv,argc);
 }
 
 /*
  * Output command version.
  */
 
-static void command_version(cli_cmd_t *self) {
-  printf("Version: %s\n", self->cli->version);
-  self->is_finished = true;
+static void command_version(cli_cmd_t *self)
+{
+    cli_output(self, "Version: %s\n", self->cli->version);
+    self->is_finished = true;
 }
 
 /*
  * Output command help.
  */
 
-void command_help(cli_cmd_t *self) {
+static void command_help(cli_cmd_t *self)
+{
+    int i = 0;
     cli_t *cli = self->cli;
 
-    printf("\n");
-    printf("  Usage: %s %s\n", cli->name, cli->usage);
-    printf("\n");
-    printf("  Options:\n");
-    printf("\n");
+    cli_output(self, "\n");
+    cli_output(self, "  Usage: %s %s\n", cli->name, cli->usage);
+    cli_output(self, "\n");
+    cli_output(self, "  Options:\n");
+    cli_output(self, "\n");
 
-    int i;
     for (i = 0; i < cvector_size(cli->options); ++i) {
         cli_opt_t *option = (cli_opt_t*)cvector_at(cli->options, i);
-        printf("    %s, %-25s %s\n" , option->small ,
+        cli_output(self, "    %s, %-25s %s\n" , option->small ,
                                       option->large_with_arg ,
                                       option->description);
     }
 
-    printf("\n");
+    cli_output(self, "\n");
     self->is_finished = true;
 }
 
@@ -486,6 +498,20 @@ cli_t*  cli_regist(const char *name, cli_cmd_callback_t cb)
 
     cli_add_option(cli, "-V", "--version", "output program version", command_version);
     cli_add_option(cli, "-h", "--help", "output help information", command_help);
+
+    return cli;
+}
+
+cli_t* cli_regist_alias(const char *name, const char *alias)
+{
+    cli_t *cli = (cli_t*)malloc(sizeof(cli_t));
+
+    cobj_set_ops(cli, &cobj_ops_cli);
+    cli->name    = name;
+    cli->alias   = alias;
+    cli->options = NULL;
+
+    chash_str_set(g_clis, name, cli);
 
     return cli;
 }
@@ -691,6 +717,16 @@ void cli_help_fun(const cli_arg_t *arg, cstr *cli_str)
 }
 #endif
 
+void cli_quit(cli_cmd_t *cmd)
+{
+    g_is_quit = true;
+    if(g_quit_cb) {
+        g_quit_cb();
+    }
+
+    cli_output(cmd, "Bye!\n");
+}
+
 void  cli_init(void)
 {
     g_clis        = chash_new();
@@ -699,6 +735,8 @@ void  cli_init(void)
 
     cstr_append(g_str_prompt, "#> ");
 
+    cli_regist("quit", cli_quit);
+    cli_regist_alias("q", "quit");
 #if 0
     cli_regist_help("help");
     cli_regist_help("?");

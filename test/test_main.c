@@ -22,6 +22,8 @@ int main(int argc, char *argv[])
     cli_t *cli = cli_regist("h", cli_hello);
     cli_add_option(cli, "-v", "--verbose <arg>", "fuck haha", NULL);
     cli_loop();
+
+    cli_release();
 #if 0
   cli_cmd_t cmd;
   int i = 0;

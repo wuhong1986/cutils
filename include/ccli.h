@@ -20,6 +20,8 @@ extern "C" {
 #include "chash.h"
 #include "cvector.h"
 
+#define cli_output(cmd, fmt, args...) cstr_append((cmd)->output, fmt, ##args)
+
 typedef struct cli_cmd cli_cmd_t;
 /**
  * @Brief  CLI命令的回调函数
@@ -30,6 +32,7 @@ typedef struct cli_cmd cli_cmd_t;
  * @Param buf_len    返回的信息长度
  */
 typedef void (*cli_cmd_callback_t)(cli_cmd_t *cmd);
+typedef void (*cli_quit_callback_t)(void);
 
 typedef struct {
     COBJ_HEAD_VARS;
@@ -59,8 +62,6 @@ typedef struct cli_s
     const char *version;
 
     cvector *options;
-    // int option_count;
-    // cli_cmd_opt_t options[COMMANDER_MAX_OPTIONS];
 
     cli_cmd_callback_t cb;
 }cli_t;
@@ -69,8 +70,6 @@ struct cli_cmd{
     cli_t   *cli;
     bool    is_finished;
     bool    is_error;
-
-    char **nargv;
 
     chash   *opts;
     cvector *args;
@@ -155,6 +154,7 @@ void  cli_release(void);
  * @Param help  该命令的帮助信息
  */
 cli_t* cli_regist(const char *name, cli_cmd_callback_t func);
+cli_t* cli_regist_alias(const char *name, const char *alias);
 
 void cli_add_option(cli_t *cli,        const char *small,
                     const char *large, const char *desc,
@@ -182,6 +182,7 @@ void cli_parse(cli_cmd_t *cmd, char *cmd_line);
  * @Returns
  */
 bool cli_is_quit(void);
+bool cli_set_quit_cb(cli_quit_callback_t cb);
 
 #ifdef __cplusplus
 }
