@@ -9,6 +9,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "ccli.h"
+#include "command.h"
+#include "cthread.h"
+#include "clog.h"
 
 void cli_hello(cli_cmd_t *cmd)
 {
@@ -18,11 +21,17 @@ void cli_hello(cli_cmd_t *cmd)
 int main(int argc, char *argv[])
 {
     cli_init();
+    log_init();
+    thread_init();
+    cmd_init();
 
-    cli_t *cli = cli_regist("h", cli_hello);
-    cli_add_option(cli, "-v", "--verbose <arg>", "fuck haha", NULL);
+    log_dbg("fuck");
+
     cli_loop();
 
+    cmd_release();
+    thread_release();
+    log_release();
     cli_release();
 #if 0
   cli_cmd_t cmd;

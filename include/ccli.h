@@ -156,12 +156,15 @@ void  cli_release(void);
 cli_t* cli_regist(const char *name, cli_cmd_callback_t func);
 cli_t* cli_regist_alias(const char *name, const char *alias);
 
-void cli_add_option(cli_t *cli,        const char *small,
+void cli_set_brief(const char *name, const char *brief);
+
+void cli_add_option(const char *name,  const char *small,
                     const char *large, const char *desc,
                     cli_cmd_callback_t cb);
 
 cstr* cli_get_welcome_str(void);
 cstr* cli_get_prompt_str(void);
+void cli_set_extra_prompt(const char *extra_prompt);
 
 void cli_welcome(void);
 void cli_loop(void);

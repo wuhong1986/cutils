@@ -50,6 +50,7 @@ static cli_quit_callback_t g_quit_cb = NULL;
 static chash *g_clis   = NULL;
 static cstr  *g_str_welcome = NULL; /* 欢迎信息 */
 static cstr  *g_str_prompt  = NULL;
+static char  *g_str_prompt_extra = NULL;
 
 bool cli_is_quit(void)
 {
@@ -244,6 +245,12 @@ cstr* cli_get_prompt_str(void)
     return g_str_prompt;
 }
 
+void cli_set_extra_prompt(const char *extra_prompt)
+{
+    free(g_str_prompt_extra);
+    g_str_prompt_extra = ex_strdup(extra_prompt);
+}
+
 void cli_welcome(void)
 {
     printf("%s", cstr_body(g_str_welcome));
@@ -258,6 +265,10 @@ void cli_loop(void)
 
     while(!cli_is_quit()){
         printf("%s", cstr_body(g_str_prompt));
+        if(g_str_prompt_extra) {
+            printf("-%s ", g_str_prompt_extra);
+        }
+        printf("> ");
 
         memset(cli_input, 0, sizeof(cli_input));
         fgets(cli_input, sizeof(cli_input), stdin);
@@ -454,6 +465,8 @@ static void command_help(cli_cmd_t *self)
     cli_t *cli = self->cli;
 
     cli_output(self, "\n");
+    cli_output(self, "  Brief: %s\n", cli->desc);
+    cli_output(self, "\n");
     cli_output(self, "  Usage: %s %s\n", cli->name, cli->usage);
     cli_output(self, "\n");
     cli_output(self, "  Options:\n");
@@ -496,8 +509,8 @@ cli_t*  cli_regist(const char *name, cli_cmd_callback_t cb)
 
     chash_str_set(g_clis, name, cli);
 
-    cli_add_option(cli, "-V", "--version", "output program version", command_version);
-    cli_add_option(cli, "-h", "--help", "output help information", command_help);
+    cli_add_option(name, "-V", "--version", "output program version", command_version);
+    cli_add_option(name, "-h", "--help", "output help information", command_help);
 
     return cli;
 }
@@ -514,6 +527,14 @@ cli_t* cli_regist_alias(const char *name, const char *alias)
     chash_str_set(g_clis, name, cli);
 
     return cli;
+}
+
+void cli_set_brief(const char *name, const char *brief)
+{
+    cli_t *cli = chash_str_get(g_clis, name);
+    if(cli){
+        cli->desc = brief;
+    }
 }
 
 /*
@@ -543,27 +564,35 @@ static void parse_argname(const char *str, char *flag, char *arg) {
   flag[flagpos] = '\0';
 }
 
-void cli_add_option(cli_t *cli,        const char *small,
+void cli_add_option(const char *name,  const char *small,
                     const char *large, const char *desc,
                     cli_cmd_callback_t cb)
 {
+    cli_t *cli = NULL;
+    cli_opt_t *option = NULL;
 
-  cli_opt_t *option = (cli_opt_t*)malloc(sizeof(cli_opt_t));
+    cli = chash_str_get(g_clis, name);
+    if(!cli) {
+        printf("No such command:%s!\n", name);
+        return;
+    }
 
-  cobj_set_ops(option, &cobj_ops_cli_opt);
+    option = (cli_opt_t*)malloc(sizeof(cli_opt_t));
 
-  option->cb    = cb;
-  option->small = small;
-  option->description = desc;
-  option->required_arg = option->optional_arg = 0;
-  option->large_with_arg = large;
-  option->argname = malloc(strlen(large) + 1);
-  option->large = malloc(strlen(large) + 1);
-  parse_argname(large, option->large, option->argname);
-  if ('[' == option->argname[0]) option->optional_arg = 1;
-  if ('<' == option->argname[0]) option->required_arg = 1;
+    cobj_set_ops(option, &cobj_ops_cli_opt);
 
-  cvector_append(cli->options, option);
+    option->cb    = cb;
+    option->small = small;
+    option->description = desc;
+    option->required_arg = option->optional_arg = 0;
+    option->large_with_arg = large;
+    option->argname = malloc(strlen(large) + 1);
+    option->large = malloc(strlen(large) + 1);
+    parse_argname(large, option->large, option->argname);
+    if ('[' == option->argname[0]) option->optional_arg = 1;
+    if ('<' == option->argname[0]) option->required_arg = 1;
+
+    cvector_append(cli->options, option);
 }
 
 #if 0
@@ -733,7 +762,7 @@ void  cli_init(void)
     g_str_welcome = cstr_new();
     g_str_prompt  = cstr_new();
 
-    cstr_append(g_str_prompt, "#> ");
+    cstr_append(g_str_prompt, "#");
 
     cli_regist("quit", cli_quit);
     cli_regist_alias("q", "quit");
@@ -750,6 +779,7 @@ void  cli_init(void)
 
 void  cli_release(void)
 {
+    free(g_str_prompt_extra);
     cstr_free(g_str_prompt);
     cstr_free(g_str_welcome);
     chash_free(g_clis);
