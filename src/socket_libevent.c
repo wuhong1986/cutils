@@ -157,9 +157,10 @@ static void listener_cb(struct evconnlistener *listener,
 
     bufferevent_setcb(bev, cb_conn_read, cb_conn_write, conn_eventcb, addr);
     bufferevent_enable(bev, EV_WRITE | EV_READ);
-    /* bufferevent_disable(bev, EV_READ); */
-    /*  */
-    /* bufferevent_write(bev, MESSAGE, strlen(MESSAGE)); */
+
+    addr_sock->fd  = -1;
+    addr_sock->bev = NULL;
+    cobj_free(addr_sock);
 }
 
 /**
@@ -198,13 +199,6 @@ static Status  sock_server_accept_fun(const thread_t *thread)
         return ERR_SOCK_LISTEN_FAILED;
     }
 
-    event_base_loop(g_event_base, EVLOOP_ONCE);
-
-    evconnlistener_free(g_event_listener);
-    g_event_listener = NULL;
-
-    printf("Exit socket listen!");
-
     return ret;
 }
 
@@ -226,7 +220,7 @@ static Status sock_recv_fun(const thread_t *thread)
 
     while(!thread_is_quit()){
         sleep_ms(TIME_100MS);
-        /* event_base_loop(g_event_base); */
+        event_base_loop(g_event_base, EVLOOP_NONBLOCK);
     }
 
     return S_OK;
@@ -245,9 +239,7 @@ void event_log_print(int severity, const char *msg)
 
 static void socket_quit(void)
 {
-    printf("\nExit socket.\n");
     event_base_loopbreak(g_event_base);
-    /* evconnlistener_disable(g_event_listener); */
 }
 
 void socket_init(void)
@@ -277,5 +269,8 @@ void socket_init(void)
 
 void socket_release(void)
 {
+    if(g_event_listener){
+        evconnlistener_free(g_event_listener);
+    }
     event_base_free(g_event_base);
 }

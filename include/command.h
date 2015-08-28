@@ -31,7 +31,8 @@ extern "C" {
  */
 #define CMD_CODE_DEFAULT        (0)     /* 0 命令为默认命令码 */
 #define CMD_CODE_CLI            (1)     /* CLI 命令 */
-#define CMD_CODE_DEBUG          (0x7FFFFF)
+#define CMD_CODE_PING           (0x7F00)
+#define CMD_CODE_DEBUG          (0x7F01)
 #define TAG_CLI_REQ_CMD         (0)
 #define TAG_CLI_RESP_CONTENT    (0)
 

@@ -38,15 +38,15 @@ int main(int argc, char *argv[])
     msg.dev_type = 1;
     strcpy(msg.dev_name, "1001");
 
-    /* socket_recv_start(); */
     socket_server_start(50002);
+    socket_recv_start();
     socket_bc_tx_start("test", 50000, 50001, 50002);
     socket_bc_rx_start("test", 50000, 50001, &msg);
 
     cli_loop();
 
-    socket_release();
     dev_addr_mgr_release();
+    socket_release();
     cmd_release();
     thread_release();
     log_release();

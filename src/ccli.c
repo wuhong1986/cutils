@@ -759,7 +759,7 @@ void cli_quit(cli_cmd_t *cmd)
         }
     }
 
-    sleep_ms(TIME_100MS * 5);
+    sleep_ms(TIME_100MS * 2);
     cli_output(cmd, "Bye!\n");
 }
 

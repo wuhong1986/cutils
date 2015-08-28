@@ -17,6 +17,7 @@
 #include "cthread.h"
 #include "chash.h"
 #include "clog.h"
+#include "ccli.h"
 #include "ex_assert.h"
 
 #define CMD_START_BYTE      0xAA
@@ -25,8 +26,8 @@
 #define CMD_OT_CHECK_PERIOD (TIME_100MS)
 #define CMD_OT_CHECK_TIME   (TIME_1S)
 #define CMD_OT_DEFAULT      (2 * TIME_1S)
-/* #define CMD_DEBUG_TX */
-/* #define CMD_DEBUG_RX */
+#define CMD_DEBUG_TX
+#define CMD_DEBUG_RX
 
 #define CMD_GET_BODY_TLVP(cmd) ((cmd)->body.tlvp)
 #define CMD_GET_BODY_DATA(cmd) ((cmd)->body.data)
@@ -60,6 +61,11 @@ static  clist *g_cmd_list_ot  = NULL;    /* 超时命令列表 */
 static csem  *g_sem_recv_cnt  = NULL;
 static csem  *g_sem_recv = NULL;
 static clist *g_cmd_list_recv[CMD_PRIOR_CNT];
+
+static uint32_t cmd_head_common_get_size(const void *head2)
+{
+    return 0;
+}
 
 void cmd_head_set_ops(uint8_t head_type, const cmd_head_ops_t *ops)
 {
@@ -144,19 +150,19 @@ inline static void cmd_set_is_resp(cmd_t *cmd, bool is_resp)
 {
     is_resp
   ? (cmd->head.part_1.cmd_code |= 0x8000)
-  : (cmd->head.part_1.cmd_code &= 0x7FFFF);
+  : (cmd->head.part_1.cmd_code &= 0x7FFF);
 }
 
 cmd_code_t cmd_get_code(const cmd_t *cmd)
 {
-    return cmd->head.part_1.cmd_code & 0x7FFFF;
+    return cmd->head.part_1.cmd_code & 0x7FFF;
 }
 
 void cmd_set_code(cmd_t *cmd, cmd_code_t code, bool is_resp)
 {
     is_resp
   ? (cmd->head.part_1.cmd_code = (code | 0x8000))
-  : (cmd->head.part_1.cmd_code = (code & 0x7FFFF));
+  : (cmd->head.part_1.cmd_code = (code & 0x7FFF));
 }
 
 cmd_idx_t cmd_get_idx(const cmd_t *cmd)
@@ -424,16 +430,16 @@ static Status cmd_process_recv_resp(cmd_t *cmd)
          *  3. 数据请求方对请求进行重发，对方重复应答
          * */
         log_dbg("discard resp cmd, dev:%s code:%d, cmd_idx:%d",
-                cmd_get_dev_addr_name(cmd), cmd_code, cmd_get_idx(cmd));
+                cmd_get_dev_addr_name(cmd), cmd_get_code(cmd), cmd_get_idx(cmd));
         return ret;
     }
 
     routine = find_cmd_routine_resp(cmd_code);
 
-    if(NULL == routine || NULL == routine->callback_resp){
+    if(NULL == routine){
         log_dbg("cmd code:%d can't find process routine!", cmd_code);
         ret = ERR_CMD_ROUTINE_NOT_FOUND; /*  没有注册该命令 */
-    } else {
+    } else if(routine->callback_resp) {
         ret = routine->callback_resp(cmd);
     }
 
@@ -455,10 +461,10 @@ static Status cmd_process_recv_req(cmd_t *cmd)
 
     cmd_resp = cmd_new_resp(cmd);
 
-    if(NULL == routine || NULL == routine->callback_req){
+    if(NULL == routine){
         log_err("Cmd Code:%d Routine Not Found", cmd_code);
         cmd_set_error(cmd_resp, CMD_E_NO_ROUTINE); /*  没有注册该命令，返回错误信息 */
-    } else {
+    } else if(routine->callback_req){
         routine->callback_req(cmd, cmd_resp);
     }
 
@@ -518,14 +524,8 @@ void cmd_to_data(const cmd_t *cmd, uint8_t *data, uint32_t data_len)
     uint32_t   body_len  = 0;
     uint32_t   head_len  = 0;
     uint32_t  offset     = 0;
-    cmd_head_t head_send;
 
     UNUSED(data_len);
-
-    ex_memzero_one(&head_send);
-
-    /* 计算头部校验码 */
-    head_send = cmd->head;
 
     data[0] = CMD_START_BYTE;
     offset += CMD_START_BYTE_LEN;
@@ -536,9 +536,12 @@ void cmd_to_data(const cmd_t *cmd, uint8_t *data, uint32_t data_len)
 #else
     /* 拷贝头部信息 */
     memcpy(&(data[offset]), &(cmd->head.part_1), sizeof(cmd_head_1_t));
-    CMD_GET_HEAD_OPS(cmd).cb_copy(&(cmd->head.part_2),
-                                  &(data[offset + sizeof(cmd_head_1_t)]),
-                                  head_len - sizeof(cmd_head_1_t));
+    if(CMD_GET_HEAD_OPS(cmd).cb_copy){
+        CMD_GET_HEAD_OPS(cmd).cb_copy(&(cmd->head.part_2),
+                                      &(data[offset + sizeof(cmd_head_1_t)]),
+                                      head_len - sizeof(cmd_head_1_t));
+    }
+    data[offset + head_len - 1] = cmd->head.check_sum;
 #endif
     offset += head_len;
 
@@ -586,8 +589,9 @@ Status cmd_send(cmd_t *cmd)
     data_len = cmd_sizeof(cmd);
     data     = ex_malloc(uint8_t, data_len);
 
+    /* log_dbg("data_len:%d", data_len); */
+
     cmd_to_data(cmd, data, data_len);
-    /* LoggerDebug("data_len:%d", data_len); */
 
     nSend = dev_addr_send(cmd->dev_addr, data, data_len);
     if(nSend != (int)data_len){
@@ -778,7 +782,7 @@ void cmd_receive(addr_t *addr, const void *data, uint32_t len)
     cmd_head_t *head      = NULL;
 #ifdef CMD_DEBUG_RX
     uint32_t  i = 0;
-    printf("Rx:\n\t0x");
+    printf("Rx:0x");
     for (i = 0; i < len; i++) {
         printf("%02X ", ((uint8_t*)data)[i]);
     }
@@ -858,9 +862,12 @@ restart_recv:
             memcpy(&(head->check_sum), (uint8_t*)data + len - buf_left, len_read);
             buf_left -= len_read;
 
+            size_head = sizeof(cmd_head_1_t)
+                      + g_cmd_head_ops[head->part_1.cmd_type].cb_get_size(NULL);
+
             /* LoggerDebug("recv cmd head"); */
             /* bufferevent_read(bev, &(pAddr->addr_sock.head), sizeof(CmdHead_T)); */
-            check_sum = check_sum_u8(head, size_head - 1); /* 校验码自身不校验 */
+            check_sum = check_sum_u8(head, size_head);
             if(check_sum != head->check_sum){
                 log_warn("Cmd Check failed, head size:%d buf left:%d "
                          " we want:0x%02X, but result is 0x%02X",
@@ -1485,9 +1492,37 @@ static void cli_remote(const cli_arg_t *arg, cstr *cli_str)
 }
 #endif
 
+static void cli_ping(cli_cmd_t *cmd)
+{
+    dev_addr_t *dev_addr = NULL;
+    cmd_req_t *req = NULL;
+
+    dev_addr = dev_addr_mgr_get("1001");
+    if(!dev_addr){
+        cli_output(cmd, "No such device: %s\n", "1001");
+        return;
+    }
+
+    req = cmd_new_req(dev_addr, CMD_CODE_PING);
+
+    cmd_send_request(req);
+}
+
+static void cli_debug(cli_cmd_t *arg)
+{
+
+}
+
+static void cli_request(cli_cmd_t *arg)
+{
+
+}
+
 void cmd_init(void)
 {
     ex_memzero(&g_cmd_head_ops, sizeof(g_cmd_head_ops));
+
+    g_cmd_head_ops[CMD_TYPE_COMMON].cb_get_size = cmd_head_common_get_size;
 
     uint8_t i = 0;
     for(i = 0; i < CMD_PRIOR_CNT; ++i) {
@@ -1503,6 +1538,12 @@ void cmd_init(void)
     g_sem_recv_cnt = csem_new(0);
     g_sem_recv     = cmutex_new();
 
+    cli_regist("ping",  cli_ping);
+    cli_regist("req_dbg", cli_debug);
+    cli_regist("request", cli_request);
+
+    cli_add_option("ping", "-n", "--node <node name>",
+                   "remote node name you want to ping", NULL);
 #if 0
     /*
      * 注册命令处理的CLI命令
@@ -1513,6 +1554,7 @@ void cmd_init(void)
     /* 注册远程CLI 命令 */
     cmd_routine_regist_resp(CMD_CODE_CLI, cmd_process_cli_resp, NULL);
 #endif
+    cmd_routine_regist_req(CMD_CODE_PING, NULL);
 
     thread_new("cmd_recv",     cmd_recv_proc_thread_fun, NULL);
     thread_new("cmd_ot_check", cmd_ot_check_thread_fun, NULL);

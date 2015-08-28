@@ -62,7 +62,7 @@ void cobj_addr_sock_destory(void *obj)
     addr_sock_t *addr_sock = (addr_sock_t*)obj;
 
     if(addr_sock->bev){
-        /* bufferevent_free(addr_sock->bev); */
+        bufferevent_free(addr_sock->bev);
     }
 }
 
@@ -79,6 +79,7 @@ addr_sock_t* cobj_addr_sock_new(void)
 
     cobj_set_ops(addr_sock, &cobj_ops_addr_sock);
     addr_sock->fd = SOCK_FD_INVALID;
+    addr_sock->bev = NULL;
 
     return addr_sock;
 }
@@ -261,7 +262,6 @@ void addr_sock_connect(addr_t *addr, void *obj_addr_info)
     bufferevent_enable(bev, EV_WRITE | EV_READ);
 
     addr_sock->bev = bev;
-    /* event_base_dispatch(g_event_base); */
 }
 
 void addr_sock_init(void)
