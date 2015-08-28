@@ -12,6 +12,9 @@
 #include "command.h"
 #include "cthread.h"
 #include "clog.h"
+#include "socket_broadcast.h"
+#include "ex_memory.h"
+#include "dev_addr_mgr.h"
 
 void cli_hello(cli_cmd_t *cmd)
 {
@@ -24,11 +27,26 @@ int main(int argc, char *argv[])
     log_init();
     thread_init();
     cmd_init();
+    dev_addr_mgr_init();
+    addr_sock_init();
+    socket_init();
 
-    log_dbg("fuck");
+    socket_resp_msg_t msg;
+    dev_addr_mgr_add_support_dev_type(1);
+
+    ex_memzero_one(&msg);
+    msg.dev_type = 1;
+    strcpy(msg.dev_name, "1001");
+
+    /* socket_recv_start(); */
+    socket_server_start(50002);
+    socket_bc_tx_start("test", 50000, 50001, 50002);
+    socket_bc_rx_start("test", 50000, 50001, &msg);
 
     cli_loop();
 
+    socket_release();
+    dev_addr_mgr_release();
     cmd_release();
     thread_release();
     log_release();

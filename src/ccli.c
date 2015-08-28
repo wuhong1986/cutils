@@ -15,6 +15,7 @@
 #include "clist.h"
 #include "ex_file.h"
 #include "ex_string.h"
+#include "ex_time.h"
 #include "ccli.h"
 #include "cobj_str.h"
 
@@ -46,7 +47,8 @@ cobj_ops_t cobj_ops_cli_opt = {
 };
 
 static bool  g_is_quit = false;
-static cli_quit_callback_t g_quit_cb = NULL;
+static cli_quit_callback_t g_quit_cbs[8];
+static int g_quit_cb_idx = 0;
 static chash *g_clis   = NULL;
 static cstr  *g_str_welcome = NULL; /* 欢迎信息 */
 static cstr  *g_str_prompt  = NULL;
@@ -57,9 +59,9 @@ bool cli_is_quit(void)
     return g_is_quit;
 }
 
-bool cli_set_quit_cb(cli_quit_callback_t cb)
+bool cli_add_quit_cb(cli_quit_callback_t cb)
 {
-    g_quit_cb = cb;
+    g_quit_cbs[g_quit_cb_idx++] = cb;
 }
 
 #if 0
@@ -748,11 +750,16 @@ void cli_help_fun(const cli_arg_t *arg, cstr *cli_str)
 
 void cli_quit(cli_cmd_t *cmd)
 {
+    int i = 0;
     g_is_quit = true;
-    if(g_quit_cb) {
-        g_quit_cb();
+
+    for(i = 0; i < g_quit_cb_idx; ++i) {
+        if(g_quit_cbs[i]) {
+            g_quit_cbs[i]();
+        }
     }
 
+    sleep_ms(TIME_100MS * 5);
     cli_output(cmd, "Bye!\n");
 }
 

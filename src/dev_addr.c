@@ -16,6 +16,7 @@ static void dev_addr_free(void *obj)
 {
     dev_addr_t *dev_addr = (dev_addr_t*)obj;
 
+    cmutex_free(dev_addr->mutex_cmd_idx);
     clist_free(dev_addr->list_addr);
     free(dev_addr->name);
 }

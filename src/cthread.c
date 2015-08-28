@@ -310,8 +310,6 @@ static void thread_quit(void)
 {
     printf("Prepare to kill all threads...\n");
     g_is_need_quit = true;
-    sleep_ms(TIME_100MS * 2);
-    printf("Done!\n");
 }
 
 bool thread_is_quit(void)
@@ -347,7 +345,7 @@ void thread_init(void)
     g_sem_bt = cmutex_new();
 #endif
 
-    cli_set_quit_cb(thread_quit);
+    cli_add_quit_cb(thread_quit);
 
     cli_regist("thread", cli_thread_fun);
     cli_set_brief("thread", "Show system threads info.");

@@ -42,6 +42,8 @@ static void addr_free(void *obj)
     cobj_free(addr->addr_info);
     cmutex_free(addr->mutex_send);
     cmutex_free(addr->mutex_recv);
+    cmutex_free(addr->mutex_sync);
+    csem_free(addr->sem_sync);
 }
 
 static cobj_ops_t cobj_ops_addr = {

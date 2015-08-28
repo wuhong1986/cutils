@@ -56,10 +56,7 @@ inline static void router_table_unlock(void)
 
 void addr_type_set_name(uint8_t type, const char *name)
 {
-    if(NULL != dev_addr_mgr.addr_types[type].name) {
-        free(dev_addr_mgr.addr_types[type].name);
-    }
-    dev_addr_mgr.addr_types[type].name = strdup(name);
+    dev_addr_mgr.addr_types[type].name = name;
 }
 
 void addr_type_set_prior(uint8_t type, uint8_t prior)
@@ -147,7 +144,7 @@ dev_addr_t* dev_addr_mgr_add(const char *name, uint16_t type_dev)
         dev_addr = dev_addr_new(name, type_dev);
 
         clist_append(dev_addr_mgr.list_devs_addr, dev_addr);
-        // log_dbg("dev addr mgr add %s", name);
+        log_dbg("dev addr mgr add %s", name);
     } else {
         dev_addr_set_type_dev(dev_addr, type_dev);
     }

@@ -69,7 +69,7 @@ typedef struct addr_ops_s {
 }addr_ops_t;
 
 struct addr_type_s {
-    char   *name;
+    const char *name;
     uint8_t type;   /* 地址类型，相同类型地址ops 必须一样 */
     uint8_t prior;  /* 优先级 */
     addr_ops_t ops; /* 该地址的一些回调函数 */

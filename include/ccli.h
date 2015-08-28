@@ -185,7 +185,7 @@ void cli_parse(cli_cmd_t *cmd, char *cmd_line);
  * @Returns
  */
 bool cli_is_quit(void);
-bool cli_set_quit_cb(cli_quit_callback_t cb);
+bool cli_add_quit_cb(cli_quit_callback_t cb);
 
 #ifdef __cplusplus
 }
