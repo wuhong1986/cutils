@@ -217,13 +217,17 @@ void cmd_set_idx(cmd_t *cmd, cmd_idx_t idx);
 void     cmd_set_error(cmd_t *cmd, cmd_error_t error);
 cmd_error_t cmd_get_error(const cmd_t *cmd);
 cmd_prior_t cmd_get_prior(const cmd_t *cmd);
+cmd_body_type_t cmd_get_body_type(const cmd_t *cmd);
+void cmd_set_body_type(cmd_t *cmd, cmd_body_type_t type);
 void cmd_set_prior(cmd_t *cmd, cmd_prior_t prior);
-void cmd_set_req_async(cmd_t *cmd);
-void cmd_set_req_sync(cmd_t *cmd);
+void cmd_req_set_sync(cmd_req_t *cmd_req);
+void cmd_req_set_async(cmd_req_t *cmd_req);
 
 Status cmd_send_request(cmd_req_t *cmd_req);
 Status cmd_send_resp(cmd_t *cmd);
 void   cmd_receive(addr_t *addr, const void *data, uint32_t len);
+
+void cmd_req_set_data(cmd_req_t *cmd_req, const void *data, uint32_t len);
 
 bool cmd_param_contain(const cmd_t *cmd, uint8_t tag);
 

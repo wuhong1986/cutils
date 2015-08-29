@@ -62,6 +62,8 @@ static csem  *g_sem_recv_cnt  = NULL;
 static csem  *g_sem_recv = NULL;
 static clist *g_cmd_list_recv[CMD_PRIOR_CNT];
 
+static Status cmd_request_list_remove(const cmd_t *cmd_resp);
+
 static uint32_t cmd_head_common_get_size(const void *head2)
 {
     return 0;
@@ -82,6 +84,38 @@ inline static void cmd_set_type(cmd_t *cmd, cmd_type_t cmd_type)
     cmd->head.part_1.cmd_type = cmd_type;
 }
 
+bool cmd_is_resp(const cmd_t *cmd)
+{
+    return cmd->head.part_1.cmd_code & 0x8000;
+}
+
+inline static void cmd_set_is_resp(cmd_t *cmd, bool is_resp)
+{
+    is_resp
+  ? (cmd->head.part_1.cmd_code |= 0x8000)
+  : (cmd->head.part_1.cmd_code &= 0x7FFF);
+}
+
+void cmd_req_set_async(cmd_req_t *cmd_req)
+{
+    cmd_req->cmd.head.part_1.req_type = CMD_REQ_TYPE_ASYNC;
+}
+
+void cmd_req_set_sync(cmd_req_t *cmd_req)
+{
+    cmd_req->cmd.head.part_1.req_type = CMD_REQ_TYPE_SYNC;
+}
+
+void cmd_set_req_type(cmd_t *cmd, cmd_req_type_t req_type)
+{
+    cmd->head.part_1.req_type = req_type;
+}
+
+cmd_req_type_t cmd_get_req_type(cmd_t *cmd)
+{
+    return cmd->head.part_1.req_type;
+}
+
 void cmd_set_dev_addr(cmd_callback_set_dev_addr cb)
 {
     g_cb_set_dev_addr = cb;
@@ -89,11 +123,16 @@ void cmd_set_dev_addr(cmd_callback_set_dev_addr cb)
 
 static void cmd_obj_release(cmd_t *cmd)
 {
+    tlvp_t  *tlvp = NULL;
+    uint8_t *data = NULL;
+
     if(CMD_BODY_TYPE_IS_TLV(cmd)){
-        tlvp_t *tlvp = CMD_GET_BODY_TLVP(cmd);
-        if(NULL != tlvp){
-            tlvp_free(tlvp);
-            tlvp = NULL;
+        tlvp = CMD_GET_BODY_TLVP(cmd);
+        if(tlvp){ tlvp_free(tlvp); }
+    } else if(CMD_BODY_TYPE_IS_DATA(cmd)) {
+        if(!cmd_is_resp(cmd)){
+            data = CMD_GET_BODY_DATA(cmd);
+            if(data) { free(data); }
         }
     }
 }
@@ -110,9 +149,16 @@ static void cobj_cmd_req_free(void *val)
     cmd_obj_release(&(req->cmd));
 }
 
-void cmd_req_free(cmd_req_t *cmd_req)
+static inline void cmd_req_do_free(cmd_req_t *cmd_req)
 {
     cobj_free(cmd_req);
+}
+
+void cmd_req_free(cmd_req_t *cmd_req)
+{
+    if(CMD_REQ_TYPE_SYNC == cmd_get_req_type(&(cmd_req->cmd))){
+        cmd_request_list_remove(&(cmd_req->cmd));
+    }
 }
 
 static cobj_ops_t cobj_ops_cmd_req = {
@@ -141,18 +187,6 @@ inline static void cmd_list_ot_unlock(void)
     clist_unlock(g_cmd_list_ot);
 }
 
-bool cmd_is_resp(const cmd_t *cmd)
-{
-    return cmd->head.part_1.cmd_code & 0x8000;
-}
-
-inline static void cmd_set_is_resp(cmd_t *cmd, bool is_resp)
-{
-    is_resp
-  ? (cmd->head.part_1.cmd_code |= 0x8000)
-  : (cmd->head.part_1.cmd_code &= 0x7FFF);
-}
-
 cmd_code_t cmd_get_code(const cmd_t *cmd)
 {
     return cmd->head.part_1.cmd_code & 0x7FFF;
@@ -173,6 +207,16 @@ cmd_idx_t cmd_get_idx(const cmd_t *cmd)
 void cmd_set_idx(cmd_t *cmd, cmd_idx_t idx)
 {
     cmd->head.part_1.cmd_idx = idx;
+}
+
+cmd_body_type_t cmd_get_body_type(const cmd_t *cmd)
+{
+    return cmd->head.part_1.body_type;
+}
+
+void cmd_set_body_type(cmd_t *cmd, cmd_body_type_t type)
+{
+    cmd->head.part_1.body_type = type;
 }
 
 inline static uint32_t cmd_get_data_len(const cmd_t *cmd)
@@ -334,16 +378,6 @@ cmd_req_t *cmd_new_req(dev_addr_t *dev_addr, cmd_code_t code)
     return cmd_req;
 }
 
-void cmd_set_req_async(cmd_t *cmd)
-{
-    cmd->head.part_1.req_type = CMD_REQ_TYPE_ASYNC;
-}
-
-void cmd_set_req_sync(cmd_t *cmd)
-{
-    cmd->head.part_1.req_type = CMD_REQ_TYPE_SYNC;
-}
-
 cmd_t *cmd_new_resp(cmd_t *cmd_req)
 {
     cmd_t *cmd = NULL;
@@ -354,6 +388,7 @@ cmd_t *cmd_new_resp(cmd_t *cmd_req)
     cmd_set_type(cmd, cmd_get_type(cmd_req));
     cmd_set_code(cmd, cmd_get_code(cmd_req), true);
     cmd_set_idx(cmd, cmd_get_idx(cmd_req));
+    cmd_set_req_type(cmd, cmd_get_req_type(cmd_req));
     /* cmd_head_init_resp(&(cmd->head), &(cmd_req->head)); */
 
     return cmd;
@@ -382,15 +417,16 @@ static bool cmd_equal(const cmd_t *cmd1, const cmd_t *cmd2)
  *
  * @Returns   ERR_CMD_NO_SUCH_REQ_CMD: 不存在该请求命令，或者已经进行超时处理了
  */
-static Status cmd_req_del_by_resp(const cmd_t *cmd_resp)
+static Status cmd_request_list_remove(const cmd_t *cmd_resp)
 {
     cmd_req_t *req   = NULL;
     bool      bExist = false;
     Status    ret    = S_OK;
-    clist_iter iter = clist_begin(g_cmd_list_req);
+    clist_iter iter;
 
     cmd_list_req_lock();
 
+    iter = clist_begin(g_cmd_list_req);
     clist_iter_foreach_obj(&iter, req){
         if(cmd_equal(&(req->cmd), cmd_resp)){
 
@@ -411,11 +447,33 @@ static Status cmd_req_del_by_resp(const cmd_t *cmd_resp)
     return ret;
 }
 
-static Status cmd_process_recv_resp(cmd_t *cmd)
+static Status cmd_process_recv_resp_sync(cmd_t *cmd)
+{
+    cmd_req_t *req = NULL;
+    clist_iter iter;
+
+    cmd_list_req_lock();
+
+    iter = clist_begin(g_cmd_list_req);
+    clist_iter_foreach_obj(&iter, req){
+        if(cmd_equal(&(req->cmd), cmd)){
+            clist_pop(&iter);
+            break;
+        }
+    }
+
+    cmd_list_req_unlock();
+
+    log_dbg("recv sync response.");
+
+    return S_OK;
+}
+
+static Status cmd_process_recv_resp_async(cmd_t *cmd)
 {
     cmd_routine_t *routine = NULL;
     Status        ret      = S_OK;
-    uint32_t    cmd_code = 0;
+    uint32_t      cmd_code = 0;
 
     cmd_code = cmd_get_code(cmd);
 
@@ -423,7 +481,7 @@ static Status cmd_process_recv_resp(cmd_t *cmd)
     /*         dev_addr_get_name(cmd->dev_addr), cmd_code, cmd_get_id(cmd)); */
 
     /*  接收到应答, 从管理链表中删除之前的请求命令 */
-    ret = cmd_req_del_by_resp(cmd);
+    ret = cmd_request_list_remove(cmd);
     if(ret != S_OK){
         /*  1. 该请求已经超时了，在请求列表中没有找到请求，不处理, 丢弃该应答命令
          *  2. 数据应答方对数据进行重发，重复接收，之前已经删除了该请求命令
@@ -444,6 +502,15 @@ static Status cmd_process_recv_resp(cmd_t *cmd)
     }
 
     return ret;
+}
+
+static Status cmd_process_recv_resp(cmd_t *cmd)
+{
+    if(CMD_REQ_TYPE_ASYNC == cmd_get_req_type(cmd)) {
+        return cmd_process_recv_resp_async(cmd);
+    } else {
+        return cmd_process_recv_resp_sync(cmd);
+    }
 }
 
 static Status cmd_process_recv_req(cmd_t *cmd)
@@ -497,11 +564,13 @@ void cmd_param_finish(cmd_t *cmd)
 {
     uint32_t data_len = 0;
 
-    tlvp_t *tlvp = CMD_GET_BODY_TLVP(cmd);
-    if(NULL == tlvp || tlvp_cnt(tlvp) == 0) data_len = 0;
-    else data_len = tlvp_sizeof(tlvp);
+    if(CMD_BODY_TYPE_TLV == cmd_get_body_type(cmd)){
+        tlvp_t *tlvp = CMD_GET_BODY_TLVP(cmd);
+        if(NULL == tlvp || tlvp_cnt(tlvp) == 0) data_len = 0;
+        else data_len = tlvp_sizeof(tlvp);
+        cmd_set_data_len(cmd, data_len);
+    }
 
-    cmd_set_data_len(cmd, data_len);
     cmd->head.check_sum = check_sum_u8(&(cmd->head), sizeof(cmd_head_t) - 1);
 }
 
@@ -542,6 +611,7 @@ void cmd_to_data(const cmd_t *cmd, uint8_t *data, uint32_t data_len)
                                       head_len - sizeof(cmd_head_1_t));
     }
     data[offset + head_len - 1] = cmd->head.check_sum;
+    /* printf("head check sum: %02X", cmd->head.check_sum); */
 #endif
     offset += head_len;
 
@@ -550,12 +620,12 @@ void cmd_to_data(const cmd_t *cmd, uint8_t *data, uint32_t data_len)
     if(body_len > 0){
         if(CMD_BODY_TYPE_IS_TLV(cmd)) {
             tlvp_to_data(CMD_GET_BODY_TLVP(cmd), data_body, body_len);
-            offset += body_len;
         } else if(CMD_BODY_TYPE_IS_DATA(cmd)) {
             memcpy(data_body, CMD_GET_BODY_DATA(cmd), body_len);
         }
 
         /*  计算数据校验码 */
+        offset += body_len;
         data[offset] = check_sum_u8(data_body, body_len);
     }
 }
@@ -577,12 +647,9 @@ Status cmd_send(cmd_t *cmd)
     uint8_t  *data    = NULL;
     uint32_t data_len = 0;
     int      nSend    = 0;
-    cmd_head_t head_send;
 #ifdef CMD_DEBUG_TX
     uint32_t i = 0;
 #endif
-
-    ex_memzero_one(&head_send);
 
     cmd_param_finish(cmd);
 
@@ -716,7 +783,7 @@ Status cmd_send_request(cmd_req_t *req)
         cmd_req_node_set_sent(req);
     } else { /*  发送失败或者不需要对方应答 */
         if(!is_need_resp){
-            cmd_req_free(req); /*  释放条件1 */
+            cmd_req_do_free(req); /*  释放条件1 */
         } else { /* 发送失败, 在请求列表中删除该请求相关信息 */
             cmd_req_node_delete(req);
         }
@@ -983,13 +1050,9 @@ static Status   cmd_recv_proc_thread_fun(const thread_t *thread)
 
         cmd_process_recv(cmd_recv->cmd);
 
-#if 0
-        if(async) {
-
-        } else { /* sync */
-
+        if(CMD_BODY_TYPE_IS_DATA(cmd_recv->cmd)) {
+            CMD_GET_BODY_DATA(cmd_recv->cmd) = NULL;
         }
-#endif
 
         /*  释放资源 */
         cobj_free(cmd_recv);
@@ -1117,8 +1180,6 @@ static Status cmd_ot_proc_thread_fun(const thread_t *thread)
     UNUSED(thread);
 
     while(!thread_is_quit()){
-
-        /*  等待有超时的命令 */
         if(csem_down_timed(g_sem_ot_cnt, TIME_100MS) != 0) {
             continue;
         }
@@ -1128,15 +1189,23 @@ static Status cmd_ot_proc_thread_fun(const thread_t *thread)
         cmd_list_ot_unlock();
 
         if(NULL != req){
-            /*  处理超时命令 */
             cmd_process_timeout(&(req->cmd));
 
-            /*  释放空间 */
-            cobj_free(req);/*  请求命令内存释放条件3 */
+            cobj_free(req);
         }
     }
 
     return S_OK;
+}
+
+void cmd_req_set_data(cmd_req_t *cmd_req, const void *data, uint32_t len)
+{
+    cmd_t *cmd = &(cmd_req->cmd);
+
+    cmd_set_body_type(cmd, CMD_BODY_TYPE_DATA);
+    cmd_set_data_len(cmd, len);
+    cmd->body.data = (uint8_t*)malloc(len);
+    memcpy(cmd->body.data, data, len);
 }
 
 void cmd_param_add_tlv_value(cmd_t *cmd, uint8_t tag, tlv_value_t *value)
@@ -1504,8 +1573,14 @@ static void cli_ping(cli_cmd_t *cmd)
     }
 
     req = cmd_new_req(dev_addr, CMD_CODE_PING);
+    cmd_req_set_sync(req);
+
+    uint8_t data[8] = {0, 1, 2, 3, 4, 5, 6, 7};
+    cmd_req_set_data(req, data, sizeof(data));
 
     cmd_send_request(req);
+
+    cmd_req_free(req);
 }
 
 static void cli_debug(cli_cmd_t *arg)
@@ -1520,11 +1595,12 @@ static void cli_request(cli_cmd_t *arg)
 
 void cmd_init(void)
 {
+    uint8_t i = 0;
+
     ex_memzero(&g_cmd_head_ops, sizeof(g_cmd_head_ops));
 
     g_cmd_head_ops[CMD_TYPE_COMMON].cb_get_size = cmd_head_common_get_size;
 
-    uint8_t i = 0;
     for(i = 0; i < CMD_PRIOR_CNT; ++i) {
         g_cmd_list_recv[i] = clist_new();
     }
