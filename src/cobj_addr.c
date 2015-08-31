@@ -19,8 +19,6 @@ struct addr_s {
     addr_type_t *addr_type;
     void *addr_info;    /* 地址信息，具体类型的地址自定义 */
 
-    cmutex *mutex_sync;
-    csem   *sem_sync;
     /* ========================================================================
      *        send
      * ===================================================================== */
@@ -42,8 +40,6 @@ static void addr_free(void *obj)
     cobj_free(addr->addr_info);
     cmutex_free(addr->mutex_send);
     cmutex_free(addr->mutex_recv);
-    cmutex_free(addr->mutex_sync);
-    csem_free(addr->sem_sync);
 }
 
 static cobj_ops_t cobj_ops_addr = {
@@ -65,8 +61,6 @@ addr_t* addr_new(struct dev_addr_s *dev_addr,
     addr->addr_info  = addr_info;
     addr->mutex_send = cmutex_new();
     addr->mutex_recv = cmutex_new();
-    addr->mutex_sync = cmutex_new();
-    addr->sem_sync   = csem_new(0);
 
     return addr;
 }

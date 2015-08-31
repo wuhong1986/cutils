@@ -18,6 +18,9 @@ static void cobj_cmd_recv_free(void *val)
     if(NULL == cmd_recv) return ;
 
     cmd = cmd_recv->cmd;
+    if(CMD_BODY_TYPE_DATA == cmd_get_body_type(cmd)) {
+        cmd->body.data = NULL;
+    }
 
     cmd_free(cmd);
     free(cmd_recv->data);

@@ -18,6 +18,7 @@ extern "C" {
 #include "dev_addr_mgr.h"
 #include "tlv.h"
 #include "cobj_cmd_routine.h"
+#include "cobj_cmd_recv.h"
 
 /* 所有命令都包含的公共TAG */
 #define TAG_DEST_SLOT   (0x7F)  /* 目的槽号， 当包含此TAG时
@@ -32,7 +33,7 @@ extern "C" {
 #define CMD_CODE_DEFAULT        (0)     /* 0 命令为默认命令码 */
 #define CMD_CODE_CLI            (1)     /* CLI 命令 */
 #define CMD_CODE_PING           (0x7F00)
-#define CMD_CODE_DEBUG          (0x7F01)
+#define CMD_CODE_ECHO           (0x7F01)
 #define TAG_CLI_REQ_CMD         (0)
 #define TAG_CLI_RESP_CONTENT    (0)
 
@@ -89,7 +90,8 @@ typedef enum cmd_req_type_e
 
 typedef struct cmd_head_1_s
 {
-    cmd_type_t      cmd_type:5;
+    cmd_type_t      cmd_type:4;
+    bool            req_broadcast:1;
     cmd_req_type_t  req_type:1;
     cmd_prior_t     prior:2;
     cmd_error_t     error:5;
@@ -185,6 +187,9 @@ typedef struct cmd_req_s
 
     cmd_t   cmd;
 
+    cmd_recv_t *cmd_sync_recv;
+    csem       *sem_sync;
+
     bool    is_sent;
     time_t  time_req;   /* 请求时间 */
     time_t  time_sent;  /* 成功发送时间 */
@@ -228,6 +233,8 @@ Status cmd_send_resp(cmd_t *cmd);
 void   cmd_receive(addr_t *addr, const void *data, uint32_t len);
 
 void cmd_req_set_data(cmd_req_t *cmd_req, const void *data, uint32_t len);
+void cmd_set_data(cmd_t *cmd, const void *data, uint32_t len);
+uint8_t* cmd_get_data(cmd_t *cmd);
 
 bool cmd_param_contain(const cmd_t *cmd, uint8_t tag);
 

@@ -53,6 +53,7 @@ static chash *g_clis   = NULL;
 static cstr  *g_str_welcome = NULL; /* 欢迎信息 */
 static cstr  *g_str_prompt  = NULL;
 static char  *g_str_prompt_extra = NULL;
+static chash *g_opts = NULL;
 
 bool cli_is_quit(void)
 {
@@ -64,39 +65,23 @@ bool cli_add_quit_cb(cli_quit_callback_t cb)
     g_quit_cbs[g_quit_cb_idx++] = cb;
 }
 
-#if 0
 /* ==========================================================================
  *        cli argument interface
  * ======================================================================= */
-static cli_arg_t *cli_arg_new(void)
+uint32_t cli_arg_cnt(const cli_cmd_t *cmd)
 {
-    cli_arg_t *arg = (cli_arg_t*)malloc(sizeof(cli_arg_t));
-
-    arg->argv = clist_new();
-
-    return arg;
+    return cvector_size(cmd->args);
 }
 
-static void cli_arg_free(cli_arg_t *arg)
+static const char* cli_arg_get(const cli_cmd_t *cmd, uint32_t idx)
 {
-    clist_free(arg->argv);
-    free(arg);
-}
+    cobj_str *obj = NULL;
 
-uint32_t cli_arg_cnt(const cli_arg_t *arg)
-{
-    return clist_size(arg->argv);
-}
+    if(cvector_size(cmd->args) <= idx) {
+        return NULL;
+    }
 
-static void cli_arg_add(cli_arg_t *arg, const char *str)
-{
-    cobj_str *obj = cobj_str_new(str);
-    clist_append(arg->argv, obj);
-}
-
-static const char* cli_arg_get(const cli_arg_t *arg, uint32_t idx)
-{
-    cobj_str *obj = (cobj_str*)clist_at_obj(arg->argv, idx);
+    obj = (cobj_str*)cvector_at(cmd->args, idx);
 
     if(obj != NULL) {
         return cobj_str_val(obj);
@@ -105,30 +90,30 @@ static const char* cli_arg_get(const cli_arg_t *arg, uint32_t idx)
     }
 }
 
-const char* cli_arg_get_str(const cli_arg_t *arg, uint32_t idx, const char* def)
+const char* cli_arg_get_str(const cli_cmd_t *cmd, uint32_t idx, const char* def)
 {
-    const char *val = cli_arg_get(arg, idx);
+    const char *val = cli_arg_get(cmd, idx);
 
     return val == NULL ? def : val;
 }
 
-int cli_arg_get_int(const cli_arg_t *arg, uint32_t idx, int def)
+int cli_arg_get_int(const cli_cmd_t *cmd, uint32_t idx, int def)
 {
-    const char *val = cli_arg_get(arg, idx);
+    const char *val = cli_arg_get(cmd, idx);
 
     return val == NULL ? def : atoi(val);
 }
 
-uint32_t cli_arg_get_hex(const cli_arg_t *arg, uint32_t idx, uint32_t def)
+uint32_t cli_arg_get_hex(const cli_cmd_t *cmd, uint32_t idx, uint32_t def)
 {
-    const char *val = cli_arg_get(arg, idx);
+    const char *val = cli_arg_get(cmd, idx);
     return val == NULL ? def : strtoul(val, 0, 16);
 }
 
-float cli_arg_get_float(const cli_arg_t *arg, uint32_t idx, float def)
+float cli_arg_get_float(const cli_cmd_t *cmd, uint32_t idx, float def)
 {
     float value = def;
-    const char *val = cli_arg_get(arg, idx);
+    const char *val = cli_arg_get(cmd, idx);
 
     if(val != NULL){
         sscanf(val, "%f", &value);
@@ -138,22 +123,52 @@ float cli_arg_get_float(const cli_arg_t *arg, uint32_t idx, float def)
     }
 }
 
-/**
- * @Brief  从参数列表中删除指定序号的参数
- *
- * @Param arg   参数列表
- * @Param idx   参数序号
- */
-void cli_arg_remove(cli_arg_t *arg, uint32_t idx)
+static const char* cli_opt_get(const cli_cmd_t *cmd, const char *opt)
 {
-    clist_remove_at(arg->argv, idx);
+    const char* val = NULL;
+
+    val = chash_str_str_get(cmd->opts, opt);
+    if(val) { return val; }
+    else { return chash_str_str_get(g_opts, opt); }
 }
 
-void cli_arg_remove_first(cli_arg_t *arg)
+const char* cli_opt_get_str(const cli_cmd_t *cmd, const char *opt, const char* def)
 {
-    cli_arg_remove(arg, 0);
+    const char *val = cli_opt_get(cmd, opt);
+
+    return val == NULL ? def : val;
 }
-#endif
+
+int cli_opt_get_int(const cli_cmd_t *cmd, const char *opt, int def)
+{
+    const char *val = cli_opt_get(cmd, opt);
+
+    return val == NULL ? def : atoi(val);
+}
+
+uint32_t cli_opt_get_hex(const cli_cmd_t *cmd, const char *opt, uint32_t def)
+{
+    const char *val = cli_opt_get(cmd, opt);
+    return val == NULL ? def : strtoul(val, 0, 16);
+}
+
+float cli_opt_get_float(const cli_cmd_t *cmd, const char *opt, float def)
+{
+    float value = def;
+    const char *val = cli_opt_get(cmd, opt);
+
+    if(val != NULL){
+        sscanf(val, "%f", &value);
+        return value;
+    } else {
+        return def;
+    }
+}
+
+void cli_set_default_opt(const char *opt, const char *val)
+{
+    chash_str_str_set(g_opts, opt, val);
+}
 
 void cli_cmd_init(cli_cmd_t *cmd)
 {
@@ -267,7 +282,7 @@ void cli_loop(void)
 
     while(!cli_is_quit()){
         printf("%s", cstr_body(g_str_prompt));
-        if(g_str_prompt_extra) {
+        if(g_str_prompt_extra && strcmp(g_str_prompt_extra, "") != 0) {
             printf("-%s ", g_str_prompt_extra);
         }
         printf("> ");
@@ -765,6 +780,7 @@ void cli_quit(cli_cmd_t *cmd)
 
 void  cli_init(void)
 {
+    g_opts        = chash_new();
     g_clis        = chash_new();
     g_str_welcome = cstr_new();
     g_str_prompt  = cstr_new();
@@ -790,4 +806,5 @@ void  cli_release(void)
     cstr_free(g_str_prompt);
     cstr_free(g_str_welcome);
     chash_free(g_clis);
+    chash_free(g_opts);
 }

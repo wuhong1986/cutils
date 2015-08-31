@@ -18,7 +18,9 @@
 #include "chash.h"
 #include "clog.h"
 #include "ccli.h"
+#include "csem.h"
 #include "ex_assert.h"
+#include <errno.h>
 
 #define CMD_START_BYTE      0xAA
 #define CMD_START_BYTE_LEN  (1)
@@ -130,10 +132,8 @@ static void cmd_obj_release(cmd_t *cmd)
         tlvp = CMD_GET_BODY_TLVP(cmd);
         if(tlvp){ tlvp_free(tlvp); }
     } else if(CMD_BODY_TYPE_IS_DATA(cmd)) {
-        if(!cmd_is_resp(cmd)){
-            data = CMD_GET_BODY_DATA(cmd);
-            if(data) { free(data); }
-        }
+        data = CMD_GET_BODY_DATA(cmd);
+        if(data) { free(data); }
     }
 }
 
@@ -147,6 +147,12 @@ static void cobj_cmd_req_free(void *val)
 {
     cmd_req_t *req = (cmd_req_t*)val;
     cmd_obj_release(&(req->cmd));
+    if(req->sem_sync){
+        csem_free(req->sem_sync);
+    }
+    if(req->cmd_sync_recv){
+        cobj_free(req->cmd_sync_recv);
+    }
 }
 
 static inline void cmd_req_do_free(cmd_req_t *cmd_req)
@@ -157,7 +163,9 @@ static inline void cmd_req_do_free(cmd_req_t *cmd_req)
 void cmd_req_free(cmd_req_t *cmd_req)
 {
     if(CMD_REQ_TYPE_SYNC == cmd_get_req_type(&(cmd_req->cmd))){
-        cmd_request_list_remove(&(cmd_req->cmd));
+        if(S_OK != cmd_request_list_remove(&(cmd_req->cmd))) {
+            cmd_req_do_free(cmd_req);
+        }
     }
 }
 
@@ -401,9 +409,14 @@ void   cmd_set_resp_post(cmd_t *cmd_resp, cmd_callback_resp_post cb)
 
 static bool cmd_equal(const cmd_t *cmd1, const cmd_t *cmd2)
 {
+    /* log_dbg("cmd1: %d-%d cmd2:%d-%d", */
+    /*         cmd_get_idx(cmd1), cmd_get_code(cmd1), */
+    /*         cmd_get_idx(cmd2), cmd_get_code(cmd2) */
+    /*         ); */
     if(   cmd1->dev_addr == cmd2->dev_addr
        && cmd_get_idx(cmd1)  == cmd_get_idx(cmd2)
        && cmd_get_code(cmd1) == cmd_get_code(cmd2)) {
+        /* log_dbg("equal"); */
         return true;
     }
 
@@ -429,7 +442,6 @@ static Status cmd_request_list_remove(const cmd_t *cmd_resp)
     iter = clist_begin(g_cmd_list_req);
     clist_iter_foreach_obj(&iter, req){
         if(cmd_equal(&(req->cmd), cmd_resp)){
-
             clist_remove(&iter);
             bExist = true;
 
@@ -447,12 +459,24 @@ static Status cmd_request_list_remove(const cmd_t *cmd_resp)
     return ret;
 }
 
-static Status cmd_process_recv_resp_sync(cmd_t *cmd)
+static cmd_t* cmd_recv_sync_response(cmd_req_t *req)
+{
+    if(csem_down_timed(req->sem_sync, req->time_ot) == 0) {
+        return req->cmd_sync_recv->cmd;
+    } else {
+        return NULL;
+    }
+}
+
+static Status cmd_process_recv_resp_sync(cmd_recv_t *cmd_recv)
 {
     cmd_req_t *req = NULL;
+    cmd_t     *cmd = cmd_recv->cmd;
     clist_iter iter;
 
     cmd_list_req_lock();
+
+    /* log_dbg("list size:%d", clist_size(g_cmd_list_req)); */
 
     iter = clist_begin(g_cmd_list_req);
     clist_iter_foreach_obj(&iter, req){
@@ -462,19 +486,27 @@ static Status cmd_process_recv_resp_sync(cmd_t *cmd)
         }
     }
 
-    cmd_list_req_unlock();
+    if(NULL == req) {
+        log_dbg("recv sync response, can't find request");
+        cobj_free(cmd_recv);
+    } else {
+        req->cmd_sync_recv = cmd_recv;
+        csem_up(req->sem_sync);
+    }
 
-    log_dbg("recv sync response.");
+    cmd_list_req_unlock();
 
     return S_OK;
 }
 
-static Status cmd_process_recv_resp_async(cmd_t *cmd)
+static Status cmd_process_recv_resp_async(cmd_recv_t *cmd_recv)/*{{{*/
 {
     cmd_routine_t *routine = NULL;
     Status        ret      = S_OK;
     uint32_t      cmd_code = 0;
+    cmd_t         *cmd     = NULL;
 
+    cmd = cmd_recv->cmd;
     cmd_code = cmd_get_code(cmd);
 
     /* log_dbg("Recv resp cmd, dev:%s code:%d, cmd_id:%d", */
@@ -502,24 +534,26 @@ static Status cmd_process_recv_resp_async(cmd_t *cmd)
     }
 
     return ret;
-}
+}/*}}}*/
 
-static Status cmd_process_recv_resp(cmd_t *cmd)
+static Status cmd_process_recv_resp(cmd_recv_t *cmd_recv)/*{{{*/
 {
-    if(CMD_REQ_TYPE_ASYNC == cmd_get_req_type(cmd)) {
-        return cmd_process_recv_resp_async(cmd);
+    if(CMD_REQ_TYPE_ASYNC == cmd_get_req_type(cmd_recv->cmd)) {
+        return cmd_process_recv_resp_async(cmd_recv);
     } else {
-        return cmd_process_recv_resp_sync(cmd);
+        return cmd_process_recv_resp_sync(cmd_recv);
     }
-}
+}/*}}}*/
 
-static Status cmd_process_recv_req(cmd_t *cmd)
+static Status cmd_process_recv_req(cmd_recv_t *cmd_recv)/*{{{*/
 {
     cmd_routine_t *routine  = NULL;
     Status        ret       = S_OK;
-    uint32_t    cmd_code  = 0;
+    uint32_t      cmd_code  = 0;
+    cmd_t         *cmd      = NULL;
     cmd_t         *cmd_resp = NULL;
 
+    cmd = cmd_recv->cmd;
     cmd_code = cmd_get_code(cmd);
 
     /*  接收到远程的请求命令 */
@@ -549,14 +583,14 @@ static Status cmd_process_recv_req(cmd_t *cmd)
     cmd_free(cmd_resp);
 
     return ret;
-}
+}/*}}}*/
 
-static Status cmd_process_recv(cmd_t *cmd)
+static Status cmd_process_recv(cmd_recv_t *cmd_recv)
 {
-    if(cmd_is_resp(cmd)){
-        return cmd_process_recv_resp(cmd);
+    if(cmd_is_resp(cmd_recv->cmd)){
+        return cmd_process_recv_resp(cmd_recv);
     } else {
-        return cmd_process_recv_req(cmd);
+        return cmd_process_recv_req(cmd_recv);
     }
 }
 
@@ -687,6 +721,7 @@ inline static void cmd_req_list_add(cmd_req_t *cmd_req)
 {
     cmd_list_req_lock();
 
+    /* log_dbg("cmd req list add node"); */
     clist_append(g_cmd_list_req, cmd_req);
 
     cmd_list_req_unlock();
@@ -700,9 +735,7 @@ static void cmd_req_node_set_sent(cmd_req_t *req)
 
     /* TODO: 修改为逆向查找 */
     req_find = (cmd_req_t*)clist_find_obj(g_cmd_list_req, req);
-    if(NULL != req_find){ /* 此处仍然需要查找的原因是，
-                             有可能该请求节点已经被删除，
-                             因此需要确定一下 */
+    if(NULL != req_find){
         req_find->is_sent = true;
     }
 
@@ -713,6 +746,7 @@ static void cmd_req_node_delete(cmd_req_t *req)
 {
     cmd_list_req_lock();
 
+    log_dbg("cmd req list delete node");
     clist_find_then_remove(g_cmd_list_req, req);
 
     cmd_list_req_unlock();
@@ -744,47 +778,22 @@ Status cmd_send_request(cmd_req_t *req)
 
     if(req->time_ot == CMD_REQ_TIMEOUT_NO_RESP) is_need_resp = false;
 
-#if 0
-    /*
-     * 释放位置：
-     * 1. 数据发送失败/或者不需要对方应答，在本函数中释放
-     * 2. 接收到对方应答后，在接收命令处理完释放
-     * 3. 请求命令超时，在超时处理函数中释放
-     * 4. 显示删除请求列表中的节点
-     */
-    pCmd = cmd_req_malloc(addr, cmd_code, tlv_pack);
-#endif
+    if(CMD_REQ_TYPE_SYNC == cmd_get_req_type(cmd)) {
+        req->sem_sync = csem_new(0);
+        is_need_resp = true;
+    }
 
-    /* {{{ FixBUG: Wu Hong 2014-07-19T22:51:10
-     * FixBUG: Wu Hong 2014-07-19T22:51:10
-     *      之前版本：
-     *      ret = cmd_send(pCmd);
-     *      if(ret == S_OK && dwTimeoutMs != CMD_REQ_TIMEOUT_NO_RESP) {
-     *          cmd_req_list_add(pCmd, dwTimeoutMs);
-     *      } else {
-     *          cmd_free(pCmd);
-     *      }
-     *      此时的问题是：发送命令后，应答方抢在未添加至请求列表之前就已经返回应答信息，
-     *      而此时应答接收线程由于未在请求列表中找到请求信息而将应答信息丢弃
-     *      此问题已经出现了很多次！（终于被老夫发现了)
-     *
-     *      修改该BUG为，
-     *      1. 先添加至发送请求列表中，并置发送状态为未发送
-     *      2. 如果发送成功，则修改发送状态为已发送
-     *      3. 如果发送失败，则删除该发送请求
-     }}} */
     if(is_need_resp) {
         cmd_req_list_add(req);
     }
 
     ret = cmd_send(cmd);
     if(ret == S_OK && is_need_resp) {
-        /* 发送成功，修改请求节点的发送状态 */
         cmd_req_node_set_sent(req);
-    } else { /*  发送失败或者不需要对方应答 */
+    } else {
         if(!is_need_resp){
-            cmd_req_do_free(req); /*  释放条件1 */
-        } else { /* 发送失败, 在请求列表中删除该请求相关信息 */
+            cmd_req_do_free(req);
+        } else {
             cmd_req_node_delete(req);
         }
     }
@@ -1027,6 +1036,8 @@ static Status   cmd_recv_proc_thread_fun(const thread_t *thread)
     cmd_recv_t *cmd_recv = NULL;
     clist      *cmd_list = NULL;
     uint8_t i = 0;
+    cmd_req_type_t req_type;
+    bool is_resp = false;
 
     UNUSED(thread);
 
@@ -1048,14 +1059,14 @@ static Status   cmd_recv_proc_thread_fun(const thread_t *thread)
 
         cmutex_unlock(g_sem_recv);
 
-        cmd_process_recv(cmd_recv->cmd);
+        req_type = cmd_get_req_type(cmd_recv->cmd);
+        is_resp  = cmd_is_resp(cmd_recv->cmd);
 
-        if(CMD_BODY_TYPE_IS_DATA(cmd_recv->cmd)) {
-            CMD_GET_BODY_DATA(cmd_recv->cmd) = NULL;
+        cmd_process_recv(cmd_recv);
+
+        if(CMD_REQ_TYPE_ASYNC == req_type || !is_resp){
+            cobj_free(cmd_recv);
         }
-
-        /*  释放资源 */
-        cobj_free(cmd_recv);
     }
 
     return S_OK;
@@ -1105,6 +1116,9 @@ static Status cmd_ot_check_thread_fun(const thread_t *thread)
             clist_iter_to_next(&iter);
 
             req = (cmd_req_t*)clist_iter_obj(&iter_ot);
+            if(cmd_get_req_type(&(req->cmd)) == CMD_REQ_TYPE_SYNC) {
+                continue;
+            }
 
             if(req->is_sent
             && req->time_left <= 0){
@@ -1198,14 +1212,22 @@ static Status cmd_ot_proc_thread_fun(const thread_t *thread)
     return S_OK;
 }
 
-void cmd_req_set_data(cmd_req_t *cmd_req, const void *data, uint32_t len)
+void cmd_set_data(cmd_t *cmd, const void *data, uint32_t len)
 {
-    cmd_t *cmd = &(cmd_req->cmd);
-
     cmd_set_body_type(cmd, CMD_BODY_TYPE_DATA);
     cmd_set_data_len(cmd, len);
     cmd->body.data = (uint8_t*)malloc(len);
     memcpy(cmd->body.data, data, len);
+}
+
+uint8_t* cmd_get_data(cmd_t *cmd)
+{
+    return CMD_GET_BODY_DATA(cmd);
+}
+
+void cmd_req_set_data(cmd_req_t *cmd_req, const void *data, uint32_t len)
+{
+    cmd_set_data(&(cmd_req->cmd), data, len);
 }
 
 void cmd_param_add_tlv_value(cmd_t *cmd, uint8_t tag, tlv_value_t *value)
@@ -1565,6 +1587,7 @@ static void cli_ping(cli_cmd_t *cmd)
 {
     dev_addr_t *dev_addr = NULL;
     cmd_req_t *req = NULL;
+    cmd_t     *response = NULL;
 
     dev_addr = dev_addr_mgr_get("1001");
     if(!dev_addr){
@@ -1580,17 +1603,103 @@ static void cli_ping(cli_cmd_t *cmd)
 
     cmd_send_request(req);
 
+    if(cmd_recv_sync_response(req)) {
+        cli_output(cmd, "Ping OK\n");
+    } else {
+        cli_output(cmd, "Ping timeout!\n");
+    }
+
     cmd_req_free(req);
 }
 
-static void cli_debug(cli_cmd_t *arg)
+static void cli_echo(cli_cmd_t *cmd)
+{
+    dev_addr_t *dev_addr = NULL;
+    cmd_req_t *req = NULL;
+    cmd_t     *response = NULL;
+    uint8_t   *data = NULL;
+    uint32_t   argc = 0;
+    uint32_t   i = 0;
+
+    dev_addr = dev_addr_mgr_get("1001");
+    if(!dev_addr){
+        cli_output(cmd, "No such device: %s\n", "1001");
+        return;
+    }
+
+    argc = cli_arg_cnt(cmd);
+    if(argc <= 0) {
+        cli_output(cmd, "Please input echo content.\n");
+        return;
+    }
+
+    data = (uint8_t*)malloc(argc);
+
+    for(i = 0; i < argc; ++i) {
+        data[i] = cli_arg_get_hex(cmd, i, 0);
+    }
+
+    req = cmd_new_req(dev_addr, CMD_CODE_ECHO);
+    cmd_req_set_sync(req);
+
+    cmd_req_set_data(req, data, argc);
+
+    cmd_send_request(req);
+
+    response = cmd_recv_sync_response(req);
+    if(!response) {
+        cli_output(cmd, "Echo timeout!\n");
+    } else if(cmd_get_error(response) != S_OK) {
+        cli_output(cmd, "Echo error, return code %d\n", cmd_get_error(response));
+    } else {
+        cli_output(cmd, "Echo OK, response is:\n");
+        for(i = 0; i < cmd_get_data_len(response); ++i) {
+
+        }
+    }
+
+    cmd_req_free(req);
+    free(data);
+}
+
+static void cli_request(cli_cmd_t *cmd)
 {
 
 }
 
-static void cli_request(cli_cmd_t *arg)
+static void cli_sh(cli_cmd_t *cmd)
 {
+    const char *node = cli_arg_get_str(cmd, 0, "");
 
+    cli_set_default_opt("node", node);
+    if(node && strcmp(node, "") != 0){
+        cli_set_extra_prompt(node);
+    } else {
+        cli_output(cmd, "Please input node name\n");
+    }
+}
+
+static void cli_exit(cli_cmd_t *cmd)
+{
+    cli_set_default_opt("node", "");
+    cli_set_extra_prompt("");
+}
+
+void cmd_proc_echo(const cmd_t *cmd_req, cmd_t *cmd_resp)
+{
+    uint32_t data_len = cmd_get_data_len(cmd_req);
+    uint32_t i = 0;
+    uint8_t *data = NULL;
+    uint8_t *data_resp = NULL;
+
+    data = CMD_GET_BODY_DATA(cmd_req);
+    data_resp = (uint8_t*)malloc(data_len);
+    for(i = 0; i < data_len; ++i) {
+        data_resp[i] = (~data[i]);
+    }
+
+    cmd_set_data(cmd_resp, data_resp, data_len);
+    free(data_resp);
 }
 
 void cmd_init(void)
@@ -1614,12 +1723,15 @@ void cmd_init(void)
     g_sem_recv_cnt = csem_new(0);
     g_sem_recv     = cmutex_new();
 
-    cli_regist("ping",  cli_ping);
-    cli_regist("req_dbg", cli_debug);
+    cli_regist("ping", cli_ping);
+    cli_regist("echo", cli_echo);
     cli_regist("request", cli_request);
+    cli_regist("sh",   cli_sh);
+    cli_regist("exit", cli_exit);
 
     cli_add_option("ping", "-n", "--node <node name>",
                    "remote node name you want to ping", NULL);
+    cli_regist_alias("p", "ping");
 #if 0
     /*
      * 注册命令处理的CLI命令
@@ -1631,6 +1743,7 @@ void cmd_init(void)
     cmd_routine_regist_resp(CMD_CODE_CLI, cmd_process_cli_resp, NULL);
 #endif
     cmd_routine_regist_req(CMD_CODE_PING, NULL);
+    cmd_routine_regist_req(CMD_CODE_ECHO, cmd_proc_echo);
 
     thread_new("cmd_recv",     cmd_recv_proc_thread_fun, NULL);
     thread_new("cmd_ot_check", cmd_ot_check_thread_fun, NULL);

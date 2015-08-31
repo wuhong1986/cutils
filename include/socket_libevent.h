@@ -15,7 +15,7 @@ extern "C" {
 #include <stdint.h>
 #include "ex_errno.h"
 
-Status  socket_server_start(uint16_t port);
+Status  socket_listen(uint16_t listen_port);
 Status  socket_recv_start(void);
 void socket_init(void);
 void socket_release(void);

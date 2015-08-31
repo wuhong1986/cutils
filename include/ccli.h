@@ -76,7 +76,6 @@ struct cli_cmd{
     cstr    *output;
 } ;
 
-#if 0
 /* ==========================================================================
  *        cli argument interface
  * ======================================================================= */
@@ -87,7 +86,7 @@ struct cli_cmd{
  *
  * @Returns
  */
-uint32_t cli_arg_cnt(const cli_arg_t *arg);
+uint32_t cli_arg_cnt(const cli_cmd_t *cmd);
 /**
  * @Brief  获取cli 参数列表中的字符串参数
  *
@@ -97,7 +96,7 @@ uint32_t cli_arg_cnt(const cli_arg_t *arg);
  *
  * @Returns
  */
-const char* cli_arg_get_str(const cli_arg_t *arg, uint32_t idx, const char* def);
+const char* cli_arg_get_str(const cli_cmd_t *cmd, uint32_t idx, const char* def);
 /**
  * @Brief  获取cli 参数列表中的整形(int)参数
  *
@@ -107,7 +106,7 @@ const char* cli_arg_get_str(const cli_arg_t *arg, uint32_t idx, const char* def)
  *
  * @Returns
  */
-int cli_arg_get_int(const cli_arg_t *arg, uint32_t idx, int def);
+int cli_arg_get_int(const cli_cmd_t *cmd, uint32_t idx, int def);
 /**
  * @Brief  获取cli 参数列表中的16进制参数
  *
@@ -117,18 +116,15 @@ int cli_arg_get_int(const cli_arg_t *arg, uint32_t idx, int def);
  *
  * @Returns
  */
-uint32_t cli_arg_get_hex(const cli_arg_t *arg, uint32_t idx, uint32_t def);
-float cli_arg_get_float(const cli_arg_t *arg, uint32_t idx, float def);
+uint32_t cli_arg_get_hex(const cli_cmd_t *cmd, uint32_t idx, uint32_t def);
+float cli_arg_get_float(const cli_cmd_t *cmd, uint32_t idx, float def);
 
-/**
- * @Brief  从参数列表中删除指定序号的参数
- *
- * @Param arg   参数列表
- * @Param idx   参数序号
- */
-void cli_arg_remove(cli_arg_t *arg, uint32_t idx);
-void cli_arg_remove_first(cli_arg_t *arg);
-#endif
+const char* cli_opt_get_str(const cli_cmd_t *cmd, const char *opt, const char* def);
+int cli_opt_get_int(const cli_cmd_t *cmd, const char *opt, int def);
+uint32_t cli_opt_get_hex(const cli_cmd_t *cmd, const char *opt, uint32_t def);
+float cli_opt_get_float(const cli_cmd_t *cmd, const char *opt, float def);
+
+void cli_set_default_opt(const char *opt, const char *val);
 
 /* ===============================================================================
  *          cli interfaces

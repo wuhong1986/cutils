@@ -17,9 +17,9 @@ extern "C" {
 #include "errno.h"
 
 typedef struct socket_resp_msg_s {
-    char     dev_name[32];
     uint16_t dev_type;
     uint16_t pad;
+    char     dev_name[16];
 }socket_resp_msg_t;
 
 Status socket_bc_tx_start(const char *name, uint16_t port_bc,

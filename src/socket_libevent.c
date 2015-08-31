@@ -170,13 +170,10 @@ static void listener_cb(struct evconnlistener *listener,
  *
  * @Returns
  */
-static Status  sock_server_accept_fun(const thread_t *thread)
+Status  socket_listen(uint16_t listen_port)
 {
     Status   ret         = S_OK;
-    uint16_t listen_port = 0;
     struct  sockaddr_in saddr_server;
-
-    listen_port = (uint16_t)(long)thread_get_arg(thread);
 
     memset(&saddr_server, 0, sizeof(struct sockaddr_in));
     saddr_server.sin_family      = AF_INET;
@@ -195,16 +192,11 @@ static Status  sock_server_accept_fun(const thread_t *thread)
                                                (struct sockaddr*)&saddr_server,
                                                sizeof(saddr_server));
     if (!g_event_listener) {
-        log_err("listen failed !\n");
+        log_err("listen port %d failed !\n", listen_port);
         return ERR_SOCK_LISTEN_FAILED;
     }
 
     return ret;
-}
-
-Status socket_server_start(uint16_t port)
-{
-    return thread_new("sock listen", sock_server_accept_fun, (void*)((long)port));
 }
 
 /**
@@ -219,13 +211,12 @@ static Status sock_recv_fun(const thread_t *thread)
     UNUSED(thread);
 
     while(!thread_is_quit()){
-        sleep_ms(TIME_100MS);
+        sleep_ms(TIME_100MS * 2);
         event_base_loop(g_event_base, EVLOOP_NONBLOCK);
     }
 
     return S_OK;
 }
-
 
 Status  socket_recv_start(void)
 {
