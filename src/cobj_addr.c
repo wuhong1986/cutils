@@ -16,7 +16,7 @@ struct addr_s {
     time_t  time_create;    /* 创建的时间 */
     time_t  time_keepalive; /* 上次保活的时间 */
 
-    addr_type_t *addr_type;
+    struct addr_type_s *addr_type;
     void *addr_info;    /* 地址信息，具体类型的地址自定义 */
 
     /* ========================================================================

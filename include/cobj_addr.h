@@ -16,10 +16,10 @@ extern "C" {
 #include <stdint.h>
 #include "cobj.h"
 
-typedef struct addr_s addr_t;
-
 struct dev_addr_s;
 struct addr_type_s;
+typedef struct addr_s addr_t;
+
 addr_t* addr_new(struct dev_addr_s *dev_addr,
                  struct addr_type_s *addr_type,
                  void *addr_info);

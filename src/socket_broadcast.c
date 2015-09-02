@@ -30,6 +30,7 @@
 #include "ex_socket.h"
 #include "dev_addr_mgr.h"
 #include "dev_addr_sock.h"
+#include "dev_router.h"
 #include "socket_broadcast.h"
 
 typedef struct broad_info_s {
@@ -39,7 +40,7 @@ typedef struct broad_info_s {
     uint16_t port_resp;
     uint16_t port_connect;
 
-    socket_resp_msg_t msg;
+    broadcast_msg_t msg;
 }broad_info_t;
 /*  */
 /* static void broad_info_free(void *ptr) */
@@ -142,9 +143,9 @@ static Status sock_bc_rx_th_cb(const thread_t *thread)
         saddr_resp.sin_addr   = saddr_remote.sin_addr;
 
         ret = sendto(sock_resp,
-                     (const char*)(&(info->msg)), sizeof(socket_resp_msg_t), 0,
+                     (const char*)(&(info->msg)), sizeof(broadcast_msg_t), 0,
                      (struct sockaddr *)&(saddr_resp), sizeof(saddr_resp));
-        if(ret != sizeof(socket_resp_msg_t)) {
+        if(ret != sizeof(broadcast_msg_t)) {
             log_err("sendto failed:%s", strerror(errno));
         } else {
             /* log_dbg("send to center"); */
@@ -242,13 +243,19 @@ static Status sock_bc_resp_th_cb(const thread_t *thread)
 #define     MAX_MSG_LEN_BC_RECV     256
     socklen_t addrlen = 0;
     int     iRetRecv;
-    socket_resp_msg_t msg;
+    broadcast_msg_t msg;
     int     opt      = 1;
     struct sockaddr_in sockaddrLocal;
     broad_info_t info;
     SockFd sock_bc_resp = SOCK_FD_INVALID;
     dev_addr_t  *dev_addr = NULL;
+    dev_addr_t  *dev_addr_router = NULL;
     addr_sock_t  *addr_sock = NULL;
+    uint32_t i = 0;
+    uint32_t subnet_idx = 0;
+    uint32_t node_offset = 0;
+    bool is_add = true;
+    network_node_t *network_node = NULL;
 
     info = *((broad_info_t*)thread_get_arg(thread));
 
@@ -286,26 +293,59 @@ static Status sock_bc_resp_th_cb(const thread_t *thread)
 
         addrlen = sizeof(struct sockaddr_in);   /* 一定要加上这句，
                                                    否则接收到的地址为0.0.0.0 */
-        iRetRecv = recvfrom(sock_bc_resp, (char*)&msg, sizeof(socket_resp_msg_t), 0,
+        iRetRecv = recvfrom(sock_bc_resp, (char*)&msg, sizeof(broadcast_msg_t), 0,
                             (struct sockaddr *)&(addr_sock->sockaddr), &addrlen);
         if(iRetRecv < 0){
             log_err("recvfrom failed:%s", strerror(errno));
             break;
         }
 
-        if(dev_addr_mgr_is_support_dev_type(msg.dev_type)) {
-            if(strcmp(msg.dev_name, "") == 0) {
-                strcpy(msg.dev_name, "Undefined");
+        for(i = 0; i < msg.router_cnt; ++i) {
+            network_node = &(msg.network_nodes[i]);
+
+
+            if(dev_addr_mgr_is_support_dev_type(network_node->dev_type)) {
+                if(strcmp(network_node->dev_name, "") == 0) {
+                    strcpy(network_node->dev_name, "Undefined");
+                }
+
+                addr_sock->sockaddr.sin_port = htons(info.port_connect);
+                addr_sock->is_fix_port = true;
+
+                is_add = false;
+                if(i == 0 || NETWORK_TYPE_CENTER == dev_addr_mgr_get_network_type()) {
+                    is_add = true;
+                }
+
+                /* Add router device */
+                if(is_add){
+                    dev_addr = dev_addr_mgr_add(network_node->dev_name,
+                                                network_node->dev_type,
+                                                network_node->subnet_cnt);
+                    dev_addr_set_network_type(dev_addr, NETWORK_TYPE_ROUTER);
+                    dev_addr_set_addr_mac(dev_addr, network_node->addr_mac);
+                    if(i == 0){
+                        dev_addr_router = dev_addr;
+                        dev_addr_add(dev_addr, ADDR_TYPE_ETHERNET, addr_sock);
+                    } else {
+                        dev_addr->is_remote = true;
+                        dev_addr->addr_router = dev_addr_router;
+
+                    }
+                }
+            } else {
+                /* log_warn("recv unsupport dev type: %d name: %s", */
+                /*          msg.dev_type, msg.dev_name); */
             }
+        }
 
-            addr_sock->sockaddr.sin_port = htons(info.port_connect);
-            addr_sock->is_fix_port = true;
-
-            dev_addr = dev_addr_mgr_add(msg.dev_name, msg.dev_type);
-            dev_addr_add(dev_addr, ADDR_TYPE_ETHERNET, addr_sock);
-        } else {
-            /* log_warn("recv unsupport dev type: %d name: %s", */
-            /*          msg.dev_type, msg.dev_name); */
+        node_offset = 1;
+        for(i = 0; i < msg.router_list_cnt; ++i) {
+            /* Add router record */
+            dev_router_add_path(msg.network_nodes,
+                                &(msg.network_nodes[node_offset]),
+                                msg.router_list_lens[i]);
+            node_offset += msg.router_list_lens[i];
         }
 
     }
@@ -341,7 +381,7 @@ Status socket_bc_tx_start(const char *name, uint16_t port_bc,
 
 Status socket_bc_rx_start(const char *name,
                           uint16_t port_bc, uint16_t port_resp,
-                          const socket_resp_msg_t *msg)
+                          const broadcast_msg_t *msg)
 {
     Status ret = S_OK;
     char   th_name[64] = {0};

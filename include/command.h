@@ -99,6 +99,11 @@ typedef struct cmd_head_1_s
     uint16_t        cmd_code;
     uint16_t        cmd_idx;
     uint16_t        data_len;
+
+    addr_net_t addr_net_src;
+    addr_net_t addr_net_dst;
+    addr_mac_t addr_mac_src;
+    addr_mac_t addr_mac_dst;
 } cmd_head_1_t;
 
 typedef struct cmd_head_s{
@@ -227,10 +232,23 @@ void cmd_set_body_type(cmd_t *cmd, cmd_body_type_t type);
 void cmd_set_prior(cmd_t *cmd, cmd_prior_t prior);
 void cmd_req_set_sync(cmd_req_t *cmd_req);
 void cmd_req_set_async(cmd_req_t *cmd_req);
+uint32_t cmd_get_data_len(const cmd_t *cmd);
 
+void cmd_set_addr_net_src(cmd_t *cmd, addr_net_t addr_net_src);
+void cmd_set_addr_net_dst(cmd_t *cmd, addr_net_t addr_net_dst);
+void cmd_set_addr_mac_src(cmd_t *cmd, addr_mac_t addr_mac_src);
+void cmd_set_addr_mac_dst(cmd_t *cmd, addr_mac_t addr_mac_dst);
+
+addr_net_t cmd_get_addr_net_src(cmd_t *cmd);
+addr_net_t cmd_get_addr_net_dst(cmd_t *cmd);
+addr_mac_t cmd_get_addr_mac_src(cmd_t *cmd);
+addr_mac_t cmd_get_addr_mac_dst(cmd_t *cmd);
+
+Status cmd_send(cmd_t *cmd);
 Status cmd_send_request(cmd_req_t *cmd_req);
 Status cmd_send_resp(cmd_t *cmd);
 void   cmd_receive(addr_t *addr, const void *data, uint32_t len);
+cmd_t* cmd_recv_sync_response(cmd_req_t *req);
 
 void cmd_req_set_data(cmd_req_t *cmd_req, const void *data, uint32_t len);
 void cmd_set_data(cmd_t *cmd, const void *data, uint32_t len);

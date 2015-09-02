@@ -11,6 +11,9 @@
 #include "dev_addr.h"
 #include "command.h"
 #include "cobj_addr.h"
+#include "network.h"
+#include "clog.h"
+#include "ex_memory.h"
 
 static void dev_addr_free(void *obj)
 {
@@ -27,17 +30,29 @@ static cobj_ops_t cobj_ops_dev_addr = {
     .cb_destructor = dev_addr_free,
 };
 
-dev_addr_t* dev_addr_new(const char *name, uint16_t type_dev)
+dev_addr_t* dev_addr_new(const char *name, uint16_t type_dev, uint8_t subnet_cnt)
 {
-    dev_addr_t *dev_addr = (dev_addr_t*)malloc(sizeof(dev_addr_t));
+    uint8_t i = 0;
+    dev_addr_t *dev_addr = ex_malloc_one(dev_addr_t);
 
     cobj_set_ops(dev_addr, &cobj_ops_dev_addr);
 
     dev_addr->name      = strdup(name);
     dev_addr->type_dev  = type_dev;
+    dev_addr->subnet_cnt = subnet_cnt;
     dev_addr->list_addr = clist_new();
     dev_addr->cmd_idx   = 0;
     dev_addr->mutex_cmd_idx = cmutex_new();
+
+    if(NETWORK_TYPE_CENTER == dev_addr_mgr_get_network_type()){
+        for(i = 0; i < subnet_cnt; ++i) {
+            dev_addr->subnet_addrs[i] = network_alloc_subnet();
+            log_dbg("Alloc subnet address %04X:%02X for %s-%d",
+                    network_get_subnet_net(dev_addr->subnet_addrs[i]),
+                    network_get_subnet_idx(dev_addr->subnet_addrs[i]),
+                    dev_addr->name, i);
+        }
+    }
 
     return dev_addr;
 }
@@ -50,6 +65,27 @@ void dev_addr_add_addr(dev_addr_t *dev_addr, struct addr_s *addr)
 void dev_addr_set_type_dev(dev_addr_t *dev_addr, uint16_t type_dev)
 {
     dev_addr->type_dev = type_dev;
+}
+
+void dev_addr_set_network_type(dev_addr_t *dev_addr, network_type_t type)
+{
+    dev_addr->network_type = type;
+}
+
+network_type_t dev_addr_get_network_type(dev_addr_t *dev_addr)
+{
+    return dev_addr->network_type;
+}
+
+void dev_addr_set_addr_mac(dev_addr_t *dev_addr, addr_mac_t addr_mac)
+{
+    dev_addr->addr_mac = addr_mac;
+    /* printf("addr mac:%08X\n", addr_mac); */
+}
+
+addr_mac_t dev_addr_get_addr_mac(const dev_addr_t *dev_addr)
+{
+    return dev_addr->addr_mac;
 }
 
 const char *dev_addr_get_name(const dev_addr_t *dev_addr)

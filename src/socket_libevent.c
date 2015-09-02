@@ -141,7 +141,7 @@ static void listener_cb(struct evconnlistener *listener,
 
     sprintf(center_name, "%s:%d",
             inet_ntoa(sa_in->sin_addr), ntohs(sa_in->sin_port));
-    dev_addr = dev_addr_mgr_add(center_name, DEV_TYPE_UNKNOWN);
+    dev_addr = dev_addr_mgr_add(center_name, DEV_TYPE_UNKNOWN, 0);
 
     addr_sock = cobj_addr_sock_new();
     addr_sock->fd  = fd;

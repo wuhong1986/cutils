@@ -75,6 +75,22 @@ struct addr_type_s {
     addr_ops_t ops; /* 该地址的一些回调函数 */
 };
 
+typedef struct dev_addr_mgr_s {
+    uint16_t type_dev;
+    network_type_t network_type;
+    uint8_t  sub_card;  /* 子卡号 */
+
+    addr_mac_t addr_mac;
+
+    clist *list_devs_addr;  /* 仪器列表 */
+#if 0
+    chash *router_table;    /* 路由表 key: Mac Value: Router*/
+#endif
+
+    addr_type_t addr_types[ADDR_TYPE_MAX_CNT];
+    bool  is_support[DEV_TYPE_MAX_CNT];    /* 支持的仪器类型 */
+}dev_addr_mgr_t;
+
 struct addr_router_s;
 #ifdef CMD_ENABLE_ROUTER
 
@@ -96,8 +112,12 @@ void dev_addr_mgr_set_dev_type(uint16_t type);
 uint16_t dev_addr_mgr_get_dev_type(void);
 void dev_addr_mgr_add_support_dev_type(uint16_t type_dev);
 bool dev_addr_mgr_is_support_dev_type(uint16_t type_dev);
-dev_addr_t* dev_addr_mgr_add(const char *name, uint16_t type_dev);
+void dev_addr_mgr_set_network_type(network_type_t type);
+network_type_t dev_addr_mgr_get_network_type(void);
+dev_addr_t* dev_addr_mgr_add(const char *name, uint16_t type_dev, uint8_t subnet_cnt);
 dev_addr_t* dev_addr_mgr_get(const char *name);
+void dev_addr_mgr_set_addr_mac(addr_mac_t addr_mac);
+addr_mac_t dev_addr_mgr_get_addr_mac(void);
 uint32_t dev_addr_mgr_get_cnt(void);
 clist *dev_addr_mgr_get_name_list(void);
 clist *dev_addr_mgr_get_online_name_list(void);

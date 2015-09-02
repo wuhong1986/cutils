@@ -15,18 +15,13 @@ extern "C" {
 
 #include <stdint.h>
 #include "errno.h"
-
-typedef struct socket_resp_msg_s {
-    uint16_t dev_type;
-    uint16_t pad;
-    char     dev_name[16];
-}socket_resp_msg_t;
+#include "command_typedef.h"
 
 Status socket_bc_tx_start(const char *name, uint16_t port_bc,
                           uint16_t port_resp, uint16_t port_connect);
 Status socket_bc_rx_start(const char *name,
                           uint16_t port_bc, uint16_t port_resp,
-                          const socket_resp_msg_t *msg);
+                          const broadcast_msg_t *msg);
 
 #ifdef __cplusplus
 }

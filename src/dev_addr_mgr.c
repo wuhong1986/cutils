@@ -15,19 +15,7 @@
 #include "command.h"
 #include "clog.h"
 #include "cobj_str.h"
-
-typedef struct dev_addr_mgr_s {
-    uint16_t type_dev;
-    uint8_t  sub_card;  /* 子卡号 */
-
-    clist *list_devs_addr;  /* 仪器列表 */
-#if 0
-    chash *router_table;    /* 路由表 key: Mac Value: Router*/
-#endif
-
-    addr_type_t addr_types[ADDR_TYPE_MAX_CNT];
-    bool  is_support[DEV_TYPE_MAX_CNT];    /* 支持的仪器类型 */
-}dev_addr_mgr_t;
+#include "command_typedef.h"
 
 dev_addr_mgr_t dev_addr_mgr;
 callback_process_dev_addr_offline cb_dev_addr_offline = NULL;
@@ -40,6 +28,16 @@ inline static void list_dev_addr_lock(void)
 inline static void list_dev_addr_unlock(void)
 {
     clist_unlock(dev_addr_mgr.list_devs_addr);
+}
+
+addr_mac_t dev_addr_mgr_get_addr_mac(void)
+{
+    return dev_addr_mgr.addr_mac;
+}
+
+void dev_addr_mgr_set_addr_mac(addr_mac_t addr_mac)
+{
+    dev_addr_mgr.addr_mac = addr_mac;
 }
 
 #if 0
@@ -133,7 +131,7 @@ dev_addr_t* dev_addr_mgr_get(const char *name)
     return dev_addr;
 }
 
-dev_addr_t* dev_addr_mgr_add(const char *name, uint16_t type_dev)
+dev_addr_t* dev_addr_mgr_add(const char *name, uint16_t type_dev, uint8_t subnet_cnt)
 {
     dev_addr_t *dev_addr = NULL;
 
@@ -141,7 +139,7 @@ dev_addr_t* dev_addr_mgr_add(const char *name, uint16_t type_dev)
 
     dev_addr = dev_addr_mgr_find(name);
     if(NULL == dev_addr){
-        dev_addr = dev_addr_new(name, type_dev);
+        dev_addr = dev_addr_new(name, type_dev, subnet_cnt);
 
         clist_append(dev_addr_mgr.list_devs_addr, dev_addr);
         log_dbg("dev addr mgr add %s", name);
@@ -311,6 +309,16 @@ void dev_addr_mgr_add_support_dev_type(uint16_t type_dev)
 bool dev_addr_mgr_is_support_dev_type(uint16_t type_dev)
 {
     return dev_addr_mgr.is_support[type_dev];
+}
+
+void dev_addr_mgr_set_network_type(network_type_t type)
+{
+    dev_addr_mgr.network_type = type;
+}
+
+network_type_t dev_addr_mgr_get_network_type(void)
+{
+    return dev_addr_mgr.network_type;
 }
 
 const char *dev_type_name(uint8_t type_dev)

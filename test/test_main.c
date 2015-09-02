@@ -9,17 +9,14 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "ccli.h"
+#include "cli_commands.h"
 #include "command.h"
 #include "cthread.h"
 #include "clog.h"
 #include "socket_broadcast.h"
 #include "ex_memory.h"
 #include "dev_addr_mgr.h"
-
-void cli_hello(cli_cmd_t *cmd)
-{
-    printf("Hello\n");
-}
+#include "dev_router.h"
 
 int main(int argc, char *argv[])
 {
@@ -30,13 +27,65 @@ int main(int argc, char *argv[])
     dev_addr_mgr_init();
     addr_sock_init();
     socket_init();
+    dev_router_init();
+    cli_commands_init();
 
-    socket_resp_msg_t msg;
+    broadcast_msg_t msg;
     dev_addr_mgr_add_support_dev_type(1);
+    dev_addr_mgr_set_network_type(NETWORK_TYPE_CENTER);
+    dev_addr_mgr_set_addr_mac(0x89ABCDE0);
+
+    dev_router_set_mac_local(0x89ABCDE0);
 
     ex_memzero_one(&msg);
-    msg.dev_type = 1;
-    strcpy(msg.dev_name, "1001");
+    strcpy(msg.dev_name, "1004");
+    msg.router_list_lens[0] = 3;
+    msg.router_list_lens[1] = 3;
+    msg.router_list_lens[2] = 0;
+    msg.router_list_lens[3] = 0;
+    msg.router_cnt = 7;
+    msg.router_list_cnt = 2;
+    msg.network_nodes[0].dev_type = 1;
+    msg.network_nodes[0].addr_mac = 0x89ABCDE0;
+    msg.network_nodes[0].subnet_cnt = 4;
+    msg.network_nodes[0].network_type = NETWORK_TYPE_ROUTER;
+    strcpy(msg.network_nodes[0].dev_name, "1004");
+
+    msg.network_nodes[1].dev_type = 1;
+    msg.network_nodes[1].addr_mac = 0x89ABCDE1;
+    msg.network_nodes[1].subnet_cnt = 4;
+    msg.network_nodes[1].network_type = NETWORK_TYPE_ROUTER;
+    strcpy(msg.network_nodes[1].dev_name, "1003");
+
+    msg.network_nodes[2].dev_type = 1;
+    msg.network_nodes[2].addr_mac = 0x89ABCDE2;
+    msg.network_nodes[2].subnet_cnt = 4;
+    msg.network_nodes[2].network_type = NETWORK_TYPE_ROUTER;
+    strcpy(msg.network_nodes[2].dev_name, "1002");
+
+    msg.network_nodes[3].dev_type = 1;
+    msg.network_nodes[3].addr_mac = 0x89ABCDE3;
+    msg.network_nodes[3].subnet_cnt = 4;
+    msg.network_nodes[3].network_type = NETWORK_TYPE_ROUTER;
+    strcpy(msg.network_nodes[3].dev_name, "1001");
+
+    msg.network_nodes[4].dev_type = 1;
+    msg.network_nodes[4].addr_mac = 0x89ABCDE4;
+    msg.network_nodes[4].subnet_cnt = 4;
+    msg.network_nodes[4].network_type = NETWORK_TYPE_ROUTER;
+    strcpy(msg.network_nodes[4].dev_name, "1005");
+
+    msg.network_nodes[5].dev_type = 1;
+    msg.network_nodes[5].addr_mac = 0x89ABCDE5;
+    msg.network_nodes[5].subnet_cnt = 4;
+    msg.network_nodes[5].network_type = NETWORK_TYPE_ROUTER;
+    strcpy(msg.network_nodes[5].dev_name, "1006");
+
+    msg.network_nodes[6].dev_type = 1;
+    msg.network_nodes[6].addr_mac = 0x89ABCDE6;
+    msg.network_nodes[6].subnet_cnt = 4;
+    msg.network_nodes[6].network_type = NETWORK_TYPE_ROUTER;
+    strcpy(msg.network_nodes[6].dev_name, "1007");
 
     socket_listen(50002);
     socket_recv_start();
