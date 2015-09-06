@@ -21,6 +21,10 @@ extern "C" {
 #define ROUTER_NODE_MAX_CNT 64
 #define ROUTER_LIST_MAX_CNT 4
 
+#define ADDR_MAC_UNKNOWN 0x00000000
+#define ADDR_MAC_ERROR   0xFFFFFFFF
+#define ADDR_MAC_NONE    0xFFFFFFFE
+
 typedef uint16_t cmd_code_t;
 typedef uint16_t cmd_idx_t;
 typedef uint32_t addr_mac_t;

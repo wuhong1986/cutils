@@ -87,10 +87,15 @@ int main(int argc, char *argv[])
     msg.network_nodes[6].network_type = NETWORK_TYPE_ROUTER;
     strcpy(msg.network_nodes[6].dev_name, "1007");
 
-    socket_listen(50002);
+    socket_listen_async(50002);
+    socket_listen_cli(49999);
     socket_recv_start();
     socket_bc_tx_start("test", 50000, 50001, 50002);
     socket_bc_rx_start("test", 50000, 50001, &msg);
+
+    socket_cli_request("127.0.0.1", 49999, "test");
+    socket_cli_request("127.0.0.1", 49999, "test fuck");
+    socket_cli_request("127.0.0.1", 49999, "fuck fuck fuck you test fuck");
 
     cli_loop();
 

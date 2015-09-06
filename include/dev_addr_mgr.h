@@ -94,9 +94,6 @@ typedef struct dev_addr_mgr_s {
 struct addr_router_s;
 #ifdef CMD_ENABLE_ROUTER
 
-#define ADDR_MAC_UNKNOWN 0x00000000
-#define ADDR_MAC_ERROR   0xFFFFFFFF
-
 #endif
 
 void addr_type_set_name(uint8_t type, const char *name);

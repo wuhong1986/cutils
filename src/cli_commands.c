@@ -120,7 +120,7 @@ static void cli_request(cli_cmd_t *cmd)
 static void cli_dev_info(cli_cmd_t *cmd, const dev_addr_t *dev_addr)
 {
     cli_output(cmd, "Name: %s Type: %d\n", dev_addr->name, dev_addr->type_dev);
-    cli_output(cmd, "\tAddr NET: Addr Mac:\n");
+    cli_output(cmd, "\tAddr NET: Addr Mac:0x%08X\n", dev_addr->addr_mac);
     cli_output(cmd, "\tAddress:\n");
     if(dev_addr->list_addr) {
         clist_iter iter = clist_begin(dev_addr->list_addr);
@@ -142,6 +142,8 @@ static void cli_info(cli_cmd_t *cmd)
         const dev_addr_t *dev_addr = dev_addr_mgr_get(cobj_str_val(obj_str));
         cli_dev_info(cmd, dev_addr);
     }
+
+    clist_free(namelist);
 }
 
 static void cli_sh(cli_cmd_t *cmd)

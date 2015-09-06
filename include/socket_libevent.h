@@ -15,7 +15,11 @@ extern "C" {
 #include <stdint.h>
 #include "ex_errno.h"
 
-Status  socket_listen(uint16_t listen_port);
+void socket_listen_cli(uint16_t listen_port);
+int socket_connect_cli(const char *ip, uint16_t port);
+void socket_close_cli();
+
+void socket_listen_async(uint16_t listen_port);
 Status  socket_recv_start(void);
 void socket_init(void);
 void socket_release(void);
