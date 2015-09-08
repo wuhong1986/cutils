@@ -61,15 +61,26 @@ typedef struct cli_s
     const char *usage;
     const char *version;
 
+    bool    disable_option;
     cvector *options;
 
     cli_cmd_callback_t cb;
 }cli_t;
 
+typedef enum cli_cmd_error_e
+{
+    CLI_CMD_OK = 0,
+    CLI_CMD_NO_SUCH_CMD,
+    CLI_CMD_OPT_REQUIRE_ARG,
+    CLI_CMD_OPT_ERROR,
+} cli_cmd_error_t;
+
 struct cli_cmd{
     cli_t   *cli;
     bool    is_finished;
     bool    is_error;
+    cli_cmd_error_t error;
+    int status;
 
     chash   *opts;
     cvector *args;

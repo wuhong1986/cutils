@@ -172,12 +172,14 @@ void cli_set_default_opt(const char *opt, const char *val)
 
 void cli_cmd_init(cli_cmd_t *cmd)
 {
-    cmd->cli         = NULL;
-    cmd->is_finished = false;
-    cmd->is_error    = false;
-    cmd->opts        = chash_new();
-    cmd->args        = cvector_new();
-    cmd->output      = cstr_new();
+    cmd->cli            = NULL;
+    cmd->is_finished    = false;
+    cmd->is_error       = false;
+    cmd->error          = CLI_CMD_OK;
+    cmd->status         = 0;
+    cmd->opts           = chash_new();
+    cmd->args           = cvector_new();
+    cmd->output         = cstr_new();
 }
 
 void cli_cmd_release(cli_cmd_t *cmd)
@@ -192,12 +194,25 @@ void cli_cmd_release(cli_cmd_t *cmd)
 
 void cli_cmd_clear(cli_cmd_t *cmd)
 {
-    cmd->cli         = NULL;
-    cmd->is_finished = false;
-    cmd->is_error    = false;
+    cmd->cli            = NULL;
+    cmd->is_finished    = false;
+    cmd->is_error       = false;
+    cmd->error          = CLI_CMD_OK;
+    cmd->status         = 0;
     chash_clear(cmd->opts);
     cvector_clear(cmd->args);
     cstr_clear(cmd->output);
+}
+
+void cli_cmd_to_json(const cli_cmd_t *cmd, cstr *json)
+{
+    cstr_append(json, "{\n");
+    cstr_append(json, "\"head\": {\"");
+    cstr_append(json, "error\": %d", cmd->error);
+    cstr_append(json, ", \"status\": %d", cmd->status);
+    cstr_append(json, "},\n");
+    cstr_append(json, "\"body\": %s", cstr_body(cmd->output));
+    cstr_append(json, "}\n");
 }
 
 /**
@@ -218,8 +233,10 @@ static void cli_process(cli_cmd_t *cmd)
     if(cli && cli->cb) {
         cli->cb(cmd);
     } else if(!cli) {
+        cmd->error = CLI_CMD_NO_SUCH_CMD;
         cstr_append(cmd->output, "No such command!\n");
     } else {
+        cmd->error = CLI_CMD_NO_SUCH_CMD;
         cstr_append(cmd->output, "Undefine command callback!\n");
     }
 }
@@ -280,6 +297,7 @@ void cli_loop(void)
 
     cli_cmd_init(&cmd);
 
+    printf("Type \"ls\" for list commands. Type \"<cmd> -h\" for help.\n");
     while(!cli_is_quit()){
         printf("%s", cstr_body(g_str_prompt));
         if(g_str_prompt_extra && strcmp(g_str_prompt_extra, "") != 0) {
@@ -290,8 +308,20 @@ void cli_loop(void)
         memset(cli_input, 0, sizeof(cli_input));
         fgets(cli_input, sizeof(cli_input), stdin);
 
+        if(true == is_blank_line(cli_input)) continue;
+
         cli_parse(&cmd, cli_input);
+#if 0
+        printf("{\n");
+        printf("\"head\": {\"");
+        printf("error\": %d", cmd.error);
+        printf(", \"status\": %d", cmd.status);
+        printf("},\n");
+        printf("\"body\": %s", cstr_body(cmd.output));
+        printf("}\n");
+#else
         printf("%s", cstr_body(cmd.output));
+#endif
         cli_cmd_clear(&cmd);
 	}
     cli_cmd_release(&cmd);
@@ -352,13 +382,15 @@ static void command_parse_args(cli_cmd_t *self, int argc, char **argv) {
       cli_opt_t *option = (cli_opt_t*)cvector_at(cli->options, j);
 
       // match flag
-      if (!strcmp(arg, option->small) || !strcmp(arg, option->large)) {
+      if (!cli->disable_option
+       && (!strcmp(arg, option->small) || !strcmp(arg, option->large))) {
         // required
         if (option->required_arg) {
             val = (i < argc - 1) ? argv[++i] : NULL;
           if (!val || '-' == val[0]) {
                 cli_output(self, "%s %s argument required\n", option->large, option->argname);
                 self->is_error = true;
+                self->error = CLI_CMD_OPT_REQUIRE_ARG;
                 return;
           }
         }
@@ -385,15 +417,16 @@ static void command_parse_args(cli_cmd_t *self, int argc, char **argv) {
     }
 
     // --
-    if ('-' == arg[0] && '-' == arg[1] && 0 == arg[2]) {
+    if(!cli->disable_option && '-' == arg[0] && '-' == arg[1] && 0 == arg[2]) {
       literal = 1;
       goto match;
     }
 
     // unrecognized
-    if ('-' == arg[0] && !literal) {
+    if (!cli->disable_option && '-' == arg[0] && !literal) {
         cli_output(self, "unrecognized flag %s\n", arg);
         self->is_error = true;
+        self->error = CLI_CMD_OPT_ERROR;
         return;
     }
 
@@ -516,13 +549,14 @@ cli_t*  cli_regist(const char *name, cli_cmd_callback_t cb)
     cli_t *cli = (cli_t*)malloc(sizeof(cli_t));
 
     cobj_set_ops(cli, &cobj_ops_cli);
-    cli->name    = name;
-    cli->cb      = cb;
-    cli->alias   = NULL;
-    cli->desc    = "Undefined";
-    cli->usage   = "[options]";
-    cli->version = "1.0";
-    cli->options = cvector_new();
+    cli->name           = name;
+    cli->cb             = cb;
+    cli->alias          = NULL;
+    cli->disable_option = false;
+    cli->desc           = "Undefined";
+    cli->usage          = "[options]";
+    cli->version        = "1.0";
+    cli->options        = cvector_new();
 
     chash_str_set(g_clis, name, cli);
 
@@ -551,6 +585,14 @@ void cli_set_brief(const char *name, const char *brief)
     cli_t *cli = chash_str_get(g_clis, name);
     if(cli){
         cli->desc = brief;
+    }
+}
+
+void cli_enable_option(const char *name, bool enable)
+{
+    cli_t *cli = chash_str_get(g_clis, name);
+    if(cli){
+        cli->disable_option = !enable;
     }
 }
 
@@ -634,13 +676,12 @@ static int    cli_remote_at_cmd(uint32_t argc, char **argv, cstr *cli_str)
 }
 #endif
 
-#if 0
-static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
+static void cli_shell(cli_cmd_t *cmd)
 {
 #ifdef __linux__
     char     cmd_line[512];
     uint32_t offset     = 0;
-    uint32_t argc       = cli_arg_cnt(arg);
+    uint32_t argc       = cli_arg_cnt(cmd);
     uint32_t i          = 0;
     FILE     *pfile     = NULL;
     int32_t  read_cnt   = 0;
@@ -650,7 +691,7 @@ static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
     const char *temp_file = ".temp_cmd_shell_output";
 
     if(argc <= 0){
-        cstr_append(cli_str, "Please input shell cmd!\n");
+        cli_output(cmd, "Please input shell cmd!\n");
         return ;
     }
 
@@ -658,14 +699,14 @@ static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
 
     for (i = 0; i < argc; i++) {
         snprintf(&(cmd_line[offset]), sizeof(cmd_line),
-                 "%s ", cli_arg_get_str(arg, i, ""));
+                 "%s ", cli_arg_get_str(cmd, i, ""));
         offset = strlen(cmd_line);
     }
 
     snprintf(&(cmd_line[offset]), sizeof(cmd_line), ">%s", temp_file);
     ret_system = system(cmd_line);
     if(ret_system < 0){
-        cstr_append(cli_str, "System cmd run failed:%s\n", strerror(errno));
+        cli_output(cmd, "System cmd run failed:%s\n", strerror(errno));
     }
 
     file_size = ex_file_size(temp_file) + 1;
@@ -676,7 +717,7 @@ static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
 
     read_cnt = ex_fread(pfile, strTemp, file_size - 1);
     strTemp[read_cnt] = '\0';
-    cstr_append(cli_str, "%s", strTemp);
+    cli_output(cmd, "%s", strTemp);
 
     free(strTemp);
     ex_fclose(pfile);
@@ -685,85 +726,14 @@ static void cli_shell(const cli_arg_t *arg, cstr *cli_str)
     snprintf(cmd_line, sizeof(cmd_line), "rm -f %s", temp_file);
     ret_system = system(cmd_line);
     if(ret_system < 0){
-        cstr_append(cli_str, "System cmd run failed:%s\n", strerror(errno));
+        cli_output(cmd, "System cmd run failed:%s\n", strerror(errno));
     }
 #else
-    cstr_append(cli_str, "Only Support Linux Platform\n");
+    cli_output(cmd, "Only Support Linux Platform\n");
 #endif
 }
 
-/**
- * @Brief  CLI退出命令
- *
- * @Param argc
- * @Param argv
- * @Param result_buf
- * @Param buf_len
- *
- * @Returns
- */
-void cli_quit_fun(const cli_arg_t *arg, cstr *cli_str)
-{
-    cstr_append(cli_str, "Bye...\n");
-
-    g_is_quit = true;
-}
-
-/**
- * @Brief  CLI帮助命令
- *
- * @Param argc
- * @Param argv
- * @Param result_buf
- * @Param buf_len
- *
- * @Returns
- */
-void cli_help_fun(const cli_arg_t *arg, cstr *cli_str)
-{
-    clist_iter iter = clist_begin(g_clis);
-    const cli_t *cli  = NULL;
-    uint32_t argc = cli_arg_cnt(arg);
-
-    /*
-     *  根据输入的参数判断是查询具体某个命令的帮助信息，还是特指某个命令
-     *      1. 如果没有带参数，则输出所有命令的brief
-     *      2. 如果带参数，则认为第一个参数是要查找帮助的命令，后面的忽略
-     */
-    if(argc > 0){ /*  查询特定命令 */
-        cli = find_cli(cli_arg_get_str(arg, 0, "help"));
-        if(NULL == cli) {
-            cstr_append(cli_str, "No such command!\n");
-        } else {
-            /*
-             * 返回帮助信息的格式：
-             *      cmd\tbrief\n
-             *      Usage:\thelp\n
-             */
-            cstr_append(cli_str, "Brief:\t%s\nUsage:\t%s\n", cli->brief, cli->help);
-        }
-    } else { /*  查询所有命令 */
-        /*
-         * 返回帮助信息的格式：
-         *  cmd 占20个字节，因此命令最长占20个字节
-         *   Cmd    brief
-         *   Loop:
-         *      cmd brief\n
-         *   End Loop
-         */
-        cstr_append(cli_str, "%-20s%s\n", "Command", "Brief");
-        cstr_append(cli_str, "---------------------------------------\n");
-
-        clist_iter_foreach_obj(&iter, cli){
-            if(false == cli->is_help) {
-                cstr_append(cli_str, "%-20s%s\n", cli->cmd, cli->brief);
-            }
-        }
-    }
-}
-#endif
-
-void cli_quit(cli_cmd_t *cmd)
+static void cli_quit(cli_cmd_t *cmd)
 {
     int i = 0;
     g_is_quit = true;
@@ -778,6 +748,33 @@ void cli_quit(cli_cmd_t *cmd)
     cli_output(cmd, "Bye!\n");
 }
 
+static void cli_ls(cli_cmd_t *cmd)
+{
+    chash_iter *itor = chash_iter_new(g_clis);
+    cli_t *cli = NULL;
+    cli_t *cli_alias = NULL;
+
+    cli_output(cmd, "%-20s%s\n", "Name", "Brief");
+    cli_output(cmd, "--------------------------------------------------\n");
+    while(!chash_iter_is_end(itor)){
+        cli = chash_iter_value(itor);
+
+        if(cli->alias) {
+            cli_alias = (cli_t*)chash_str_get(g_clis, cli->alias);
+        } else {
+            cli_alias = cli;
+        }
+
+        if(cli){
+            cli_output(cmd, "%-20s%s\n", cli->name, cli_alias->desc);
+        }
+
+        chash_iter_next(itor);
+    }
+
+    chash_iter_free(itor);
+}
+
 void  cli_init(void)
 {
     g_opts        = chash_new();
@@ -787,13 +784,17 @@ void  cli_init(void)
 
     cstr_append(g_str_prompt, "#");
 
-    cli_regist("quit", cli_quit);
+    cli_regist("ls",    cli_ls);
+    cli_regist("quit",  cli_quit);
+    cli_regist("shell", cli_shell);
     cli_regist_alias("q", "quit");
+
+    cli_set_brief("ls", "Show commands list.");
+    cli_set_brief("quit", "Quit system.");
+    cli_set_brief("shell", "Run linux shell command.");
+
+    cli_enable_option("shell", false);
 #if 0
-    cli_regist_help("help");
-    cli_regist_help("?");
-    cli_regist_quit("quit");
-    cli_regist_quit("q");
 
     cli_regist("shell"  , cli_shell,
               "run linux shell command." , "shell cmd<CR>");

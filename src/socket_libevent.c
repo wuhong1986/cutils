@@ -32,6 +32,7 @@
 
 #include "cthread.h"
 #include "clog.h"
+#include "ccli.h"
 #include "cdefine.h"
 #include "ex_socket.h"
 #include "ex_memory.h"
@@ -47,6 +48,41 @@ static struct event_base *g_event_base = NULL;
 static struct evconnlistener *g_event_listener_async = NULL;
 static struct evconnlistener *g_event_listener_cli   = NULL;
 /* static struct event g_listen_ev; */
+
+int  bufferevent_send(struct bufferevent *bev, const void *data, uint32_t len)
+{
+    uint32_t max_write = 0;
+    int sent_total = 0;
+    uint32_t sent = 0;
+    uint32_t left = len;
+
+    while(left > 0) {
+        max_write = bufferevent_get_max_to_write(bev);
+        sent = left;
+        if(sent > max_write) sent = max_write;
+
+        if(sent > 0){
+            /* LoggerDebug("@@-- sent %d/%d bytes, send:%d max:%d.", */
+            /*             sent_total, length, sent, max_write); */
+            if(0 == bufferevent_write(bev, data + sent_total, sent)){
+                /* send OK */
+                sent_total += sent;
+                left -= sent;
+                /* LoggerDebug("@@!! sent %d/%d bytes, send:%d max:%d.", */
+                /*             sent_total, length, sent, max_write); */
+            } else {
+                log_info("bufferevent_write  failed: %s", strerror(errno));
+                return -1;
+            }
+        } else {
+            log_dbg("wait...");
+        }
+    }
+
+    /* bufferevent_flush(bev, EV_WRITE, BEV_FLUSH); */
+
+    return sent_total;
+}
 
 static void cb_conn_write(struct bufferevent *bev, void *user_data)
 {
@@ -85,6 +121,10 @@ static void cb_conn_read_cli(struct bufferevent *bev, void *user_data)
     void*    buffer  = NULL;
     uint32_t buf_len = 0;
     struct evbuffer *buf_in = bufferevent_get_input(bev);
+    cli_cmd_t cmd;
+    cstr *json = cstr_new();
+
+    cli_cmd_init(&cmd);
 
     /* read data frome buffer in */
     buf_len = evbuffer_get_length(buf_in);
@@ -92,9 +132,17 @@ static void cb_conn_read_cli(struct bufferevent *bev, void *user_data)
     bufferevent_read(bev, buffer, buf_len);
 
     log_dbg("recv command: %s", (char*)buffer);
+    cli_parse(&cmd, (char*)buffer);
+    cli_cmd_to_json(&cmd, json);
+    log_dbg("cli response: %s", cstr_body(json));
+
+    bufferevent_send(bev, cstr_body(json), cstr_len(json) + 1);
 
     /* put data to addr recv buffer, and translate to command format */
+    cli_cmd_release(&cmd);
+    cstr_free(json);
     free(buffer);
+    /* bufferevent_free(bev); */
 }
 
 static void conn_eventcb_async(struct bufferevent *bev, short events, void *user_data)
@@ -178,9 +226,8 @@ static void listener_cli_cb(struct evconnlistener *listener,
     bufferevent_enable(bev, EV_WRITE | EV_READ);
 }
 
-Status socket_cli_request(const char *ip, uint16_t port, const char *request_str)
+int socket_cli_send_request(const char *ip, uint16_t port, const char *request_str)
 {
-    Status ret = S_OK;
     int fd = 0;
     int write_cnt = 0;
     struct sockaddr_in saddr;
@@ -196,9 +243,41 @@ Status socket_cli_request(const char *ip, uint16_t port, const char *request_str
     log_dbg("connect to %s:%d OK", ip, port);
     write_cnt = write(fd, request_str, strlen(request_str) + 1);
 
+    if(write_cnt != strlen(request_str) + 1) {
+        log_dbg("%s failed, we want %d but recv %d", __FUNCTION__, strlen(request_str) + 1, write_cnt);
+        fd = -1;
+        SOCKET_CLOSE(fd);
+    }
+
+    return fd;
+}
+
+int socket_cli_recv_response(int fd, int msec, cstr *response)
+{
+    int recv_cnt = 0;
+    int read_cnt = 0;
+    char data[1024] = {0};
+
+    while(1) {
+        read_cnt = read(fd, data, sizeof(data) - 1);
+        if(read_cnt <= 0) {
+            break;
+        } else {
+            log_dbg("read cnt:%d %s", read_cnt, data);
+            recv_cnt += read_cnt;
+            if(data[read_cnt -1] == '\0') {
+                cstr_append(response, "%s", (char*)data);
+                break;
+            } else {
+                data[read_cnt] = '\0';
+                cstr_append(response, "%s", (char*)data);
+            }
+        }
+    }
+
     SOCKET_CLOSE(fd);
 
-    return ret;
+    return fd;
 }
 
 static void listener_async_cb(struct evconnlistener *listener,

@@ -21,6 +21,7 @@
 #include "dev_addr_sock.h"
 #include "dev_addr_mgr.h"
 #include "cobj_addr.h"
+#include "socket_libevent.h"
 
 static struct event_base *g_event_base = NULL;
 
@@ -112,39 +113,16 @@ int  addr_sock_send(void *obj_addr_info, const void *data, uint32_t len)
 {
     addr_sock_t *addr_sock = (addr_sock_t*)(obj_addr_info);
     struct bufferevent *bev = addr_sock->bev;
-
-    uint32_t max_write = 0;
     int sent_total = 0;
-    uint32_t sent = 0;
-    uint32_t left = len;
 
     bufferevent_lock(bev);
 
-    while(left > 0) {
-        max_write = bufferevent_get_max_to_write(bev);
-        sent = left;
-        if(sent > max_write) sent = max_write;
-
-        if(sent > 0){
-            /* LoggerDebug("@@-- sent %d/%d bytes, send:%d max:%d.", */
-            /*             sent_total, length, sent, max_write); */
-            if(0 == bufferevent_write(bev, data + sent_total, sent)){
-                /* send OK */
-                sent_total += sent;
-                left -= sent;
-                /* LoggerDebug("@@!! sent %d/%d bytes, send:%d max:%d.", */
-                /*             sent_total, length, sent, max_write); */
-            } else {
-                log_info("bufferevent_write  failed: %s", strerror(errno));
-                addr_sock->fd = SOCK_FD_INVALID;
-                break;
-            }
-        } else {
-            log_dbg("wait...");
-        }
+    if(bufferevent_send(bev, data, len) <= 0) {
+        addr_sock->fd = SOCK_FD_INVALID;
+        sent_total = 0;
+    } else {
+        sent_total = len;
     }
-
-    /* bufferevent_flush(bev, EV_WRITE, BEV_FLUSH); */
 
     bufferevent_unlock(bev);
 
