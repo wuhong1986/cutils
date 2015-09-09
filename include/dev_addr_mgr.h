@@ -82,7 +82,7 @@ typedef struct dev_addr_mgr_s {
 
     addr_mac_t addr_mac;
 
-    clist *list_devs_addr;  /* 仪器列表 */
+    clist *dev_addrs;  /* 仪器列表 */
 #if 0
     chash *router_table;    /* 路由表 key: Mac Value: Router*/
 #endif

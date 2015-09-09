@@ -14,6 +14,7 @@
 #include "dev_addr.h"
 #include "command.h"
 #include "clog.h"
+#include "ccli.h"
 #include "cobj_str.h"
 #include "command_typedef.h"
 
@@ -22,12 +23,12 @@ callback_process_dev_addr_offline cb_dev_addr_offline = NULL;
 
 inline static void list_dev_addr_lock(void)
 {
-    clist_lock(dev_addr_mgr.list_devs_addr);
+    clist_lock(dev_addr_mgr.dev_addrs);
 }
 
 inline static void list_dev_addr_unlock(void)
 {
-    clist_unlock(dev_addr_mgr.list_devs_addr);
+    clist_unlock(dev_addr_mgr.dev_addrs);
 }
 
 addr_mac_t dev_addr_mgr_get_addr_mac(void)
@@ -109,7 +110,7 @@ static dev_addr_t* dev_addr_mgr_find(const char *name)
     clist_node *node = NULL;
     dev_addr_t *dev_addr = NULL;
 
-    clist_foreach_val(dev_addr_mgr.list_devs_addr, node, dev_addr){
+    clist_foreach_val(dev_addr_mgr.dev_addrs, node, dev_addr){
         if(strcmp(dev_addr_get_name(dev_addr), name) == 0) {
             return dev_addr;
         }
@@ -141,7 +142,7 @@ dev_addr_t* dev_addr_mgr_add(const char *name, uint16_t type_dev, uint8_t subnet
     if(NULL == dev_addr){
         dev_addr = dev_addr_new(name, type_dev, subnet_cnt);
 
-        clist_append(dev_addr_mgr.list_devs_addr, dev_addr);
+        clist_append(dev_addr_mgr.dev_addrs, dev_addr);
         log_dbg("dev addr mgr add %s", name);
     } else {
         dev_addr_set_type_dev(dev_addr, type_dev);
@@ -173,7 +174,7 @@ void   dev_addr_mgr_proc_offline(addr_t *addr)
 
 uint32_t dev_addr_mgr_get_cnt(void)
 {
-    return clist_size(dev_addr_mgr.list_devs_addr);
+    return clist_size(dev_addr_mgr.dev_addrs);
 }
 
 static clist *dev_addr_mgr_get_name_list_config(bool only_online)
@@ -188,7 +189,7 @@ static clist *dev_addr_mgr_get_name_list_config(bool only_online)
 
     list_dev_addr_lock();
 
-    clist_foreach_val(dev_addr_mgr.list_devs_addr, node, dev_addr) {
+    clist_foreach_val(dev_addr_mgr.dev_addrs, node, dev_addr) {
         is_add = true;
         if(only_online && !dev_addr_is_online(dev_addr)) {
             is_add = false;
@@ -275,12 +276,75 @@ uint16_t dev_addr_mgr_get_dev_type(void)
     return dev_addr_mgr.type_dev;
 }
 
+void cli_output_kv_start(cli_cmd_t *cmd)
+{
+    cli_output(cmd, "{");
+}
+
+void cli_output_kv_end(cli_cmd_t *cmd)
+{
+    cli_output(cmd, "}");
+}
+
+void cli_output_kv_sep(cli_cmd_t *cmd)
+{
+    cli_output(cmd, ", ");
+}
+
+void cli_output_key_value(cli_cmd_t *cmd, const char *key, const char *value)
+{
+    cli_output(cmd, "%s: \"%s\"", key, value);
+}
+
+void cli_output_key_ivalue(cli_cmd_t *cmd, const char *key, int value)
+{
+    cli_output(cmd, "%s: %d", key, value);
+}
+
+void cli_output_key_hvalue(cli_cmd_t *cmd, const char *key, uint32_t value)
+{
+    cli_output(cmd, "%s: 0x%08X", key, value);
+}
+
+static void cli_network(cli_cmd_t *cmd)
+{
+    clist_iter iter;
+    dev_addr_t *dev_addr = NULL;
+
+    cli_output_kv_start(cmd);
+    cli_output_key_ivalue(cmd, "type_dev", dev_addr_mgr.type_dev);
+    cli_output_kv_sep(cmd);
+    cli_output_key_ivalue(cmd, "nodes_cnt", clist_size(dev_addr_mgr.dev_addrs));
+    cli_output_kv_sep(cmd);
+    cli_output(cmd, "nodes: ");
+
+    iter = clist_begin(dev_addr_mgr.dev_addrs);
+    clist_iter_foreach_obj(&iter, dev_addr){
+        cli_output_kv_start(cmd);
+        cli_output_key_value(cmd, "name", dev_addr->name);
+        cli_output_kv_sep(cmd);
+        cli_output_key_ivalue(cmd, "type_dev", dev_addr->type_dev);
+        cli_output_kv_sep(cmd);
+        cli_output_key_hvalue(cmd, "addr_net", dev_addr->addr_net);
+        cli_output_kv_sep(cmd);
+        cli_output_key_hvalue(cmd, "addr_mac", dev_addr->addr_mac);
+        cli_output_kv_end(cmd);
+        if(!clist_iter_is_end(&iter)) {
+            cli_output_kv_sep(cmd);
+        }
+    }
+
+
+    cli_output_kv_end(cmd);
+    cli_output(cmd, "\n");
+}
+
 void dev_addr_mgr_init(void)
 {
     uint8_t i = 0;
 
     dev_addr_mgr.type_dev = DEV_TYPE_UNKNOWN;
-    dev_addr_mgr.list_devs_addr = clist_new();
+    dev_addr_mgr.dev_addrs = clist_new();
 
     for (i = 0; i < ADDR_TYPE_MAX_CNT; i++) {
         dev_addr_mgr.addr_types[i].type = i;
@@ -289,11 +353,17 @@ void dev_addr_mgr_init(void)
     for (i = 0; i < DEV_TYPE_MAX_CNT; i++) {
         dev_addr_mgr.is_support[i] = false;
     }
+
+    cli_regist("network", cli_network);
+    cli_regist_alias("n", "network");
+    cli_add_option("network", "-a", "--all", "output all network nodes.", NULL);
+    cli_add_option("network", "-o", "--online", "output all online network nodes.", NULL);
+    cli_add_option("network", "-f", "--offline", "output all offline network nodes.", NULL);
 }
 
 void dev_addr_mgr_release(void)
 {
-    clist_free(dev_addr_mgr.list_devs_addr);
+    clist_free(dev_addr_mgr.dev_addrs);
 }
 
 uint16_t dev_addr_mgr_type(void)
