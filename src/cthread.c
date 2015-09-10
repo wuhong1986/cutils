@@ -205,7 +205,7 @@ Status  thread_new(const char *name, callback_thread cb, void *arg)
 
     cobj_set_ops(thread, &cobj_ops_thread);
 
-    thread->td   = g_id_last++;
+    thread->td   = ++g_id_last;
     thread->name = strdup(name);
     thread->cb   = cb;
     thread->arg  = arg;
@@ -270,22 +270,21 @@ static void cli_thread_fun(cli_cmd_t *cmd)
     }
 }
 
-#if 0
-static void cli_thread_bt_fun(const cli_arg_t *arg, cstr *cli_str)
+static void cli_thread_bt_fun(cli_cmd_t *cmd)
 {
 #ifndef __linux__
     UNUSED(arg);
-    cstr_append(cli_str, "Only support linux plateform!\n");
+    cli_output(cmd, "Only support linux plateform!\n");
 #else
     clist_iter iter = clist_begin(g_list);
     thread_t *thread = NULL;
     int td = -1;
-    uint32_t argc = cli_arg_cnt(arg);
+    uint32_t argc = cli_arg_cnt(cmd);
 
     g_bt_str = cstr_new();
 
     if(argc > 0){
-        td = cli_arg_get_int(arg, 0, 0);
+        td = cli_arg_get_int(cmd, 0, 0);
     }
 
     /* send signal to thread */
@@ -298,13 +297,12 @@ static void cli_thread_bt_fun(const cli_arg_t *arg, cstr *cli_str)
     /* sleep 100ms wait for response */
     sleep_ms(500);
 
-    cstr_add(cli_str, g_bt_str);
+    cstr_add(cmd->output, g_bt_str);
 
     cstr_free(g_bt_str);
     g_bt_str = NULL;
 #endif
 }
-#endif
 
 static void thread_quit(void)
 {
@@ -348,6 +346,7 @@ void thread_init(void)
     cli_add_quit_cb(thread_quit);
 
     cli_regist("thread", cli_thread_fun);
+    cli_regist("bt",     cli_thread_bt_fun);
     cli_set_brief("thread", "Show system threads info.");
 #if 0
     cli_regist("bt",     cli_thread_bt_fun,

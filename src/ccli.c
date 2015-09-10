@@ -123,6 +123,11 @@ float cli_arg_get_float(const cli_cmd_t *cmd, uint32_t idx, float def)
     }
 }
 
+bool cli_opt_exist(const cli_cmd_t *cmd, const char *opt)
+{
+    return chash_str_haskey(cmd->opts, opt);
+}
+
 static const char* cli_opt_get(const cli_cmd_t *cmd, const char *opt)
 {
     const char* val = NULL;
@@ -794,11 +799,6 @@ void  cli_init(void)
     cli_set_brief("shell", "Run linux shell command.");
 
     cli_enable_option("shell", false);
-#if 0
-
-    cli_regist("shell"  , cli_shell,
-              "run linux shell command." , "shell cmd<CR>");
-#endif
 }
 
 void  cli_release(void)

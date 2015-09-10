@@ -407,6 +407,7 @@ void log_init(void)
 
     g_items_enable[LOG_ITEM_LEVEL] = true;
     g_items_enable[LOG_ITEM_DATE] = true;
+    g_items_enable[LOG_ITEM_PIT] = true;
 
     /*  添加系统标准输出和文件输出 */
     g_log_out_std  = log_add_out("std", log_write_to_std, log_flush_to_std);

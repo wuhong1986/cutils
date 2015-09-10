@@ -42,7 +42,7 @@
 #include "dev_addr_mgr.h"
 #include "dev_addr_sock.h"
 
-/* #define SOCKET_LIBEVENT_ENABLE_THREAD */
+#define SOCKET_LIBEVENT_ENABLE_THREAD
 
 static struct event_base *g_event_base = NULL;
 static struct evconnlistener *g_event_listener_async = NULL;
@@ -68,8 +68,8 @@ int  bufferevent_send(struct bufferevent *bev, const void *data, uint32_t len)
                 /* send OK */
                 sent_total += sent;
                 left -= sent;
-                /* LoggerDebug("@@!! sent %d/%d bytes, send:%d max:%d.", */
-                /*             sent_total, length, sent, max_write); */
+                /* printf("@@!! sent %d/%d bytes, send:%d max:%d.\n", */
+                /*             sent_total, len, sent, max_write); */
             } else {
                 log_info("bufferevent_write  failed: %s", strerror(errno));
                 return -1;
@@ -84,12 +84,13 @@ int  bufferevent_send(struct bufferevent *bev, const void *data, uint32_t len)
     return sent_total;
 }
 
+#if 0
 static void cb_conn_write(struct bufferevent *bev, void *user_data)
 {
-#if 0
+#if 1
     struct evbuffer *output = bufferevent_get_output(bev);
     if (evbuffer_get_length(output) == 0) {
-        printf("send OK\n");
+        printf("send %d bytes OK\n", evbuffer_get_length(output));
         /* bufferevent_free(bev); */
     }
 #else
@@ -97,6 +98,7 @@ static void cb_conn_write(struct bufferevent *bev, void *user_data)
     UNUSED(user_data);
 #endif
 }
+#endif
 
 static void cb_conn_read_async(struct bufferevent *bev, void *user_data)
 {
@@ -104,12 +106,16 @@ static void cb_conn_read_async(struct bufferevent *bev, void *user_data)
     uint32_t buf_len = 0;
     addr_t   *addr   = (addr_t*)user_data;
 
+    /* bufferevent_lock(bev); */
+
     struct evbuffer *buf_in = bufferevent_get_input(bev);
 
     /* read data frome buffer in */
     buf_len = evbuffer_get_length(buf_in);
     buffer = calloc(1, buf_len);
     bufferevent_read(bev, buffer, buf_len);
+
+    /* bufferevent_unlock(bev); */
 
     /* put data to addr recv buffer, and translate to command format */
     addr_recv(addr, buffer, buf_len);
@@ -126,10 +132,14 @@ static void cb_conn_read_cli(struct bufferevent *bev, void *user_data)
 
     cli_cmd_init(&cmd);
 
+    /* bufferevent_lock(bev); */
+
     /* read data frome buffer in */
     buf_len = evbuffer_get_length(buf_in);
     buffer = calloc(1, buf_len);
     bufferevent_read(bev, buffer, buf_len);
+
+    /* bufferevent_unlock(bev); */
 
     log_dbg("recv command: %s", (char*)buffer);
     cli_parse(&cmd, (char*)buffer);
@@ -159,7 +169,8 @@ static void conn_eventcb_async(struct bufferevent *bev, short events, void *user
         is_error = true;
         log_dbg("Got an error on the connection: %s",
                 strerror(errno));/*XXX win32*/
-    } else { log_dbg("conn_eventcb other");
+    } else {
+        log_dbg("conn_eventcb other");
     }
 
     if(is_error){
@@ -222,7 +233,7 @@ static void listener_cli_cb(struct evconnlistener *listener,
 
     log_dbg("accept a cli connect");
 
-    bufferevent_setcb(bev, cb_conn_read_cli, cb_conn_write, conn_eventcb_cli, NULL);
+    bufferevent_setcb(bev, cb_conn_read_cli, NULL, conn_eventcb_cli, NULL);
     bufferevent_enable(bev, EV_WRITE | EV_READ);
 }
 
@@ -326,7 +337,7 @@ static void listener_async_cb(struct evconnlistener *listener,
     log_dbg("Accept connect from:%s, fd = %d.",
             inet_ntoa(addr_sock->sockaddr.sin_addr), fd);
 
-    bufferevent_setcb(bev, cb_conn_read_async, cb_conn_write, conn_eventcb_async, addr);
+    bufferevent_setcb(bev, cb_conn_read_async, NULL, conn_eventcb_async, addr);
     bufferevent_enable(bev, EV_WRITE | EV_READ);
 
     addr_sock->fd  = -1;
@@ -393,8 +404,9 @@ static Status sock_recv_fun(const thread_t *thread)
     UNUSED(thread);
 
     while(!thread_is_quit()){
-        sleep_ms(TIME_100MS * 2);
-        event_base_loop(g_event_base, EVLOOP_NONBLOCK);
+        /* sleep_ms(TIME_100MS * 2); */
+        /* event_base_loop(g_event_base, EVLOOP_NONBLOCK); */
+        event_base_dispatch(g_event_base);
     }
 
     return S_OK;

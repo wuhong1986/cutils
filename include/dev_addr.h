@@ -39,7 +39,7 @@ struct dev_addr_s {
     struct dev_addr_s *addr_parent;
 
     cmutex  *mutex_cmd_idx;
-    uint8_t  cmd_idx;
+    cmd_idx_t  cmd_idx;
     clist   *list_addr; /* 该仪器的地址信息列表，
                            一种仪器可包含多个地址信息比如Zigbee、WIFI等 */
 };

@@ -115,7 +115,9 @@ int  addr_sock_send(void *obj_addr_info, const void *data, uint32_t len)
     struct bufferevent *bev = addr_sock->bev;
     int sent_total = 0;
 
-    bufferevent_lock(bev);
+    if(!bev) { log_dbg("**** bev is null! ****"); return 0; }
+
+    /* bufferevent_lock(bev); */
 
     if(bufferevent_send(bev, data, len) <= 0) {
         addr_sock->fd = SOCK_FD_INVALID;
@@ -124,7 +126,7 @@ int  addr_sock_send(void *obj_addr_info, const void *data, uint32_t len)
         sent_total = len;
     }
 
-    bufferevent_unlock(bev);
+    /* bufferevent_unlock(bev); */
 
     return sent_total;
 }
@@ -149,12 +151,16 @@ static void cb_conn_read(struct bufferevent *bev, void *user_data)
     uint32_t buf_len = 0;
     addr_t   *addr = (addr_t*)user_data;
 
+    /* bufferevent_lock(bev); */
+
     struct evbuffer *buf_in = bufferevent_get_input(bev);
 
     /* read data frome buffer in */
     buf_len = evbuffer_get_length(buf_in);
     buffer = calloc(1, buf_len);
     bufferevent_read(bev, buffer, buf_len);
+
+    /* bufferevent_unlock(bev); */
 
     /* put data to addr recv buffer, and translate to command format */
     addr_recv(addr, buffer, buf_len);
@@ -221,7 +227,7 @@ void addr_sock_connect(addr_t *addr, void *obj_addr_info)
                                  addr_sock->fd,
                                  BEV_OPT_CLOSE_ON_FREE);
 #else
-#if 0
+#if 1
     bev = bufferevent_socket_new(g_event_base,
                                  addr_sock->fd,
                                  BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);

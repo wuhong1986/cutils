@@ -28,8 +28,8 @@
 #define CMD_OT_CHECK_PERIOD (TIME_100MS)
 #define CMD_OT_CHECK_TIME   (TIME_1S)
 #define CMD_OT_DEFAULT      (2 * TIME_1S)
-#define CMD_DEBUG_TX
-#define CMD_DEBUG_RX
+/* #define CMD_DEBUG_TX */
+/* #define CMD_DEBUG_RX */
 
 #define CMD_GET_BODY_TLVP(cmd) ((cmd)->body.tlvp)
 #define CMD_GET_BODY_DATA(cmd) ((cmd)->body.data)
@@ -438,6 +438,7 @@ cmd_t *cmd_new_resp(cmd_t *cmd_req)
     cmd_set_idx(cmd, cmd_get_idx(cmd_req));
     cmd_set_req_type(cmd, cmd_get_req_type(cmd_req));
     /* cmd_head_init_resp(&(cmd->head), &(cmd_req->head)); */
+    /* printf("cmd get idx:%d\n", cmd_get_idx(cmd_req)); */
 
     return cmd;
 }
@@ -598,12 +599,12 @@ static Status cmd_process_recv_req(cmd_recv_t *cmd_recv)/*{{{*/
 
     /*  接收到远程的请求命令 */
     routine = find_cmd_routine_req(cmd_code);
-    /* log_dbg("recv req prior:%d", cmd->head.prior); */
+    /* log_dbg("recv req code:%d idx:%d", cmd_code, cmd_get_idx(cmd)); */
 
     cmd_resp = cmd_new_resp(cmd);
 
     if(NULL == routine){
-        log_err("Cmd Code:%d Routine Not Found", cmd_code);
+        log_err("Cmd Code:%d idx:%d Routine Not Found", cmd_code, cmd_get_idx(cmd));
         cmd_set_error(cmd_resp, CMD_E_NO_ROUTINE); /*  没有注册该命令，返回错误信息 */
     } else if(routine->callback_req){
         routine->callback_req(cmd, cmd_resp);
@@ -625,14 +626,14 @@ static Status cmd_process_recv_req(cmd_recv_t *cmd_recv)/*{{{*/
     return ret;
 }/*}}}*/
 
-static Status cmd_process_recv(cmd_recv_t *cmd_recv)
+static Status cmd_process_recv(cmd_recv_t *cmd_recv)/*{{{*/
 {
     if(cmd_is_resp(cmd_recv->cmd)){
         return cmd_process_recv_resp(cmd_recv);
     } else {
         return cmd_process_recv_req(cmd_recv);
     }
-}
+}/*}}}*/
 
 static Status cmd_transfer_recv(cmd_recv_t *cmd_recv)
 {
@@ -681,10 +682,6 @@ void cmd_to_data(const cmd_t *cmd, uint8_t *data, uint32_t data_len)
     offset += CMD_START_BYTE_LEN;
 
     head_len = cmd_get_head_size(cmd);
-#if 0
-    memcpy(&(data[offset]), &head_send, sizeof(cmd_head_t));
-#else
-    /* 拷贝头部信息 */
     memcpy(&(data[offset]), &(cmd->head.part_1), sizeof(cmd_head_1_t));
     if(CMD_GET_HEAD_OPS(cmd).cb_copy){
         CMD_GET_HEAD_OPS(cmd).cb_copy(&(cmd->head.part_2),
@@ -693,7 +690,6 @@ void cmd_to_data(const cmd_t *cmd, uint8_t *data, uint32_t data_len)
     }
     data[offset + head_len - 1] = cmd->head.check_sum;
     /* printf("head check sum: %02X", cmd->head.check_sum); */
-#endif
     offset += head_len;
 
     data_body = &(data[offset]);
@@ -744,16 +740,16 @@ Status cmd_send(cmd_t *cmd)
 
     dev_addr_tx = cmd->dev_addr;
     if(dev_addr_tx->is_endpoint) {
-        log_dbg("Transfer msg from %s to %s",
-                    dev_addr_get_name(dev_addr_tx->addr_parent),
-                    dev_addr_get_name(dev_addr_tx));
+        /* log_dbg("Transfer msg from %s to %s", */
+        /*             dev_addr_get_name(dev_addr_tx->addr_parent), */
+        /*             dev_addr_get_name(dev_addr_tx)); */
         dev_addr_tx = dev_addr_tx->addr_parent;
     }
 
     if(dev_addr_tx->is_remote) {
-        log_dbg("Transfer msg from %s to %s",
-                    dev_addr_get_name(dev_addr_tx->addr_router),
-                    dev_addr_get_name(dev_addr_tx));
+        /* log_dbg("Transfer msg from %s to %s", */
+        /*             dev_addr_get_name(dev_addr_tx->addr_router), */
+        /*             dev_addr_get_name(dev_addr_tx)); */
         dev_addr_tx = dev_addr_tx->addr_router;
     }
 
@@ -944,6 +940,8 @@ void cmd_receive(addr_t *addr, const void *data, uint32_t len)
     printf("\n");
 #endif
 
+    /* printf("cmd recv data, length:%d\n", len); */
+
     addr_lock_recv(addr);
 
     head = &(recv_buf->recv_head);
@@ -961,6 +959,12 @@ restart_recv:
             } else {
                 log_dbg("start byte error, we want:0x%02X but recv:0x%02X",
                         CMD_START_BYTE, start_byte);
+                /* uint32_t  i = 0; */
+                /* printf("Rx:0x"); */
+                /* for (i = 0; i < len; i++) { */
+                /*     printf("%02X ", ((uint8_t*)data)[i]); */
+                /* } */
+                /* printf("\n"); */
                 /* exit(0); */
             }
         }
@@ -989,12 +993,15 @@ restart_recv:
     }
 
     if(CMD_RECV_S_HEAD_2 == recv_buf_get_status(recv_buf)) {
+        /* printf("recv head2--0"); */
         if(g_cmd_head_ops[head->part_1.cmd_type].cb_get_size){
             size_head = g_cmd_head_ops[head->part_1.cmd_type].cb_get_size(NULL);
+            /* printf("recv head2--1, size head:%d", size_head); */
 
             len_read = size_head - recv_buf->recv_head_len_2;
             if(len_read > buf_left) len_read = buf_left;
             if(len_read > 0) {
+                /* printf("recv head2--2"); */
                 memcpy(&(head->part_2[recv_buf->recv_head_len_2]),
                        (uint8_t*)data + len - buf_left,
                        len_read);
@@ -1002,6 +1009,7 @@ restart_recv:
                 recv_buf->recv_head_len_2 += len_read;
             }
         } else {
+            /* printf("recv head2--3"); */
             size_head = 0;
         }
 
@@ -1103,6 +1111,7 @@ restart_recv:
     }
 
     if(buf_left > 0 && CMD_RECV_S_START_BYTE == recv_buf_get_status(recv_buf)) {
+        /* printf("continue to recv msg, buf left:%d\n", buf_left); */
         goto restart_recv;  /* 如果缓存中还有数据则继续接收 */
     }
 
@@ -1145,8 +1154,8 @@ static Status   cmd_recv_proc_thread_fun(const thread_t *thread)
         is_resp  = cmd_is_resp(cmd);
         /* is_transfer = (cmd_get_addr_mac_dst(cmd) != dev_addr_mgr_get_addr_mac()); */
 
-        log_dbg("local mac:%08X dest mac:%08X", dev_addr_mgr_get_addr_mac(),
-                cmd_get_addr_mac_dst(cmd));
+        /* log_dbg("local mac:%08X dest mac:%08X", dev_addr_mgr_get_addr_mac(), */
+        /*         cmd_get_addr_mac_dst(cmd)); */
         if(!is_transfer){
             cmd_process_recv(cmd_recv);
         } else {
@@ -1721,6 +1730,7 @@ void cmd_init(void)
     cmd_routine_regist_resp(CMD_CODE_CLI, cmd_process_cli_resp, NULL);
 #endif
     cmd_routine_regist_req(CMD_CODE_PING, NULL);
+    cmd_routine_regist_req(CMD_CODE_TX_TEST, NULL);
     cmd_routine_regist_req(CMD_CODE_ECHO, cmd_proc_echo);
 
     thread_new("cmd_recv",     cmd_recv_proc_thread_fun, NULL);

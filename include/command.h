@@ -34,6 +34,7 @@ extern "C" {
 #define CMD_CODE_CLI            (1)     /* CLI 命令 */
 #define CMD_CODE_PING           (0x7F00)
 #define CMD_CODE_ECHO           (0x7F01)
+#define CMD_CODE_TX_TEST        (0x7F02)
 #define TAG_CLI_REQ_CMD         (0)
 #define TAG_CLI_RESP_CONTENT    (0)
 
@@ -194,6 +195,8 @@ typedef struct cmd_req_s
 
     cmd_recv_t *cmd_sync_recv;
     csem       *sem_sync;
+
+    void *private_data;
 
     bool    is_sent;
     time_t  time_req;   /* 请求时间 */

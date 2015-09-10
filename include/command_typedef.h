@@ -27,6 +27,7 @@ extern "C" {
 
 typedef uint16_t cmd_code_t;
 typedef uint16_t cmd_idx_t;
+typedef uint16_t cmd_len_t;
 typedef uint32_t addr_mac_t;
 typedef uint16_t addr_net_t;
 

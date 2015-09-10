@@ -6,14 +6,16 @@
  *      Author      :   Wu Hong
  * =============================================================================
  }}} */
+#include <string.h>
 #include "cli_commands.h"
 #include "command.h"
 #include "cobj_str.h"
 #include "cobj_addr.h"
+#include "clog.h"
 
 static dev_addr_t *cli_get_node_dev_addr(cli_cmd_t *cmd)
 {
-    const char *node = cli_opt_get_str(cmd, "node", "");
+    const char *node = cli_opt_get_str(cmd, "node", "1004");
     dev_addr_t *dev_addr = NULL;
 
     if(strcmp(node, "") == 0) {
@@ -69,11 +71,18 @@ static void cli_echo(cli_cmd_t *cmd)
     uint8_t   *data_resp = NULL;
     uint32_t   argc = 0;
     uint32_t   i = 0;
+    bool is_sync = true;
+    bool is_test = false;
+    uint32_t loop_cnt = 1;
 
     dev_addr = cli_get_node_dev_addr(cmd);
     if(!dev_addr){
         return;
     }
+
+    is_sync = (strcmp(cli_opt_get_str(cmd, "mode", "sync"), "async") != 0);
+    is_test = cli_opt_exist(cmd, "test");
+    loop_cnt = cli_opt_get_int(cmd, "loop", 1);
 
     argc = cli_arg_cnt(cmd);
     if(argc <= 0) {
@@ -110,6 +119,78 @@ static void cli_echo(cli_cmd_t *cmd)
 
     cmd_req_free(req);
     free(data);
+}
+
+static Status cmd_proc_resp_txtest(cmd_t *cmd_resp)
+{
+    return S_OK;
+}
+
+static void cli_txtest(cli_cmd_t *cmd)
+{
+    dev_addr_t *dev_addr = NULL;
+    cmd_req_t *req = NULL;
+    cmd_t     *response = NULL;
+    uint32_t   *data = NULL;
+    uint8_t   *data_resp = NULL;
+    uint32_t   argc = 0;
+    uint32_t   i = 0;
+    uint32_t pack_size = 4 * 1024;
+    bool is_sync = true;
+    bool is_test = false;
+    uint32_t loop_cnt = 1;
+
+    dev_addr = cli_get_node_dev_addr(cmd);
+    if(!dev_addr){
+        return;
+    }
+
+    is_sync = (strcmp(cli_opt_get_str(cmd, "mode", "sync"), "async") != 0);
+    is_test = cli_opt_exist(cmd, "test");
+    loop_cnt = cli_opt_get_int(cmd, "loop", 1);
+
+    data = (uint32_t*)malloc(pack_size * sizeof(uint32_t));
+
+    for(i = 0; i < pack_size; ++i) {
+        data[i] = i;
+    }
+
+    log_dbg("start tx test.");
+
+    loop_cnt = 500000;
+    for(i = 0; i < loop_cnt; ++i) {
+        /* printf("test %d\n", i); */
+        req = cmd_new_req(dev_addr, CMD_CODE_TX_TEST);
+        /* cmd_req_set_sync(req); */
+
+        cmd_req_set_data(req, data, pack_size * sizeof(uint32_t));
+
+        cmd_send_request(req);
+
+        /* sleep_ms(10); */
+
+#if 0
+        response = cmd_recv_sync_response(req);
+        if(!response) {
+            cli_output(cmd, "Echo timeout!\n");
+        } else if(cmd_get_error(response) != S_OK) {
+            cli_output(cmd, "Echo error, return code %d\n", cmd_get_error(response));
+        } else {
+            data_resp = cmd_get_data(response);
+            printf("Echo OK, response is:\n");
+            cli_output(cmd, "Echo OK, response is:\n");
+            for(i = 0; i < cmd_get_data_len(response); ++i) {
+                cli_output(cmd, " %02X", data_resp[i]);
+            }
+            cli_output(cmd, "\n");
+        }
+
+        cmd_req_free(req);
+#endif
+    }
+
+    free(data);
+    log_dbg("end tx test.");
 }
 
 static void cli_request(cli_cmd_t *cmd)
@@ -168,12 +249,21 @@ void cli_commands_init(void)
 {
     cli_regist("ping", cli_ping);
     cli_regist("echo", cli_echo);
+    cli_regist("txtest", cli_txtest);
+    cli_regist_alias("t", "txtest");
     cli_regist("request", cli_request);
     cli_regist("sh",   cli_sh);
     cli_regist("exit", cli_exit);
     cli_regist("info", cli_info);
 
+    cli_add_option("txtest", "-m", "--mode", "sync(default) or async.", NULL);
+    cli_add_option("txtest", "-t", "--test <max number value>",
+                   "enable test mode", NULL);
+    cli_add_option("txtest", "-l", "--loop <loop count>", "loop cnt", NULL);
+
     cli_add_option("ping", "-n", "--node <node name>",
                    "remote node name you want to ping", NULL);
     cli_regist_alias("p", "ping");
+
+    cmd_routine_regist_resp(CMD_CODE_TX_TEST, cmd_proc_resp_txtest, NULL);
 }

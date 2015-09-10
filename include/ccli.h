@@ -134,6 +134,7 @@ const char* cli_opt_get_str(const cli_cmd_t *cmd, const char *opt, const char* d
 int cli_opt_get_int(const cli_cmd_t *cmd, const char *opt, int def);
 uint32_t cli_opt_get_hex(const cli_cmd_t *cmd, const char *opt, uint32_t def);
 float cli_opt_get_float(const cli_cmd_t *cmd, const char *opt, float def);
+bool cli_opt_exist(const cli_cmd_t *cmd, const char *opt);
 
 void cli_set_default_opt(const char *opt, const char *val);
 

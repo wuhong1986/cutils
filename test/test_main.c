@@ -93,6 +93,7 @@ int main(int argc, char *argv[])
     socket_bc_tx_start("test", 50000, 50001, 50002);
     socket_bc_rx_start("test", 50000, 50001, &msg);
 
+#if 0
     cstr *json = cstr_new();
     int fd = 0;
     fd = socket_cli_send_request("127.0.0.1", 49999, "test");
@@ -104,6 +105,7 @@ int main(int argc, char *argv[])
     fd = socket_cli_send_request("127.0.0.1", 49999, "fuck fuck fuck you test fuck");
     socket_cli_recv_response(fd, json);
     cstr_free(json);
+#endif
 
     cli_loop();
 
