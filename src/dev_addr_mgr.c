@@ -276,36 +276,6 @@ uint16_t dev_addr_mgr_get_dev_type(void)
     return dev_addr_mgr.type_dev;
 }
 
-void cli_output_kv_start(cli_cmd_t *cmd)
-{
-    cli_output(cmd, "{");
-}
-
-void cli_output_kv_end(cli_cmd_t *cmd)
-{
-    cli_output(cmd, "}");
-}
-
-void cli_output_kv_sep(cli_cmd_t *cmd)
-{
-    cli_output(cmd, ", ");
-}
-
-void cli_output_key_value(cli_cmd_t *cmd, const char *key, const char *value)
-{
-    cli_output(cmd, "%s: \"%s\"", key, value);
-}
-
-void cli_output_key_ivalue(cli_cmd_t *cmd, const char *key, int value)
-{
-    cli_output(cmd, "%s: %d", key, value);
-}
-
-void cli_output_key_hvalue(cli_cmd_t *cmd, const char *key, uint32_t value)
-{
-    cli_output(cmd, "%s: 0x%08X", key, value);
-}
-
 static void cli_network(cli_cmd_t *cmd)
 {
     clist_iter iter;

@@ -195,6 +195,14 @@ void cli_parse(cli_cmd_t *cmd, char *cmd_line);
 bool cli_is_quit(void);
 bool cli_add_quit_cb(cli_quit_callback_t cb);
 
+void cli_output_kv_start(cli_cmd_t *cmd);
+void cli_output_kv_end(cli_cmd_t *cmd);
+void cli_output_kv_sep(cli_cmd_t *cmd);
+void cli_output_key_value(cli_cmd_t *cmd, const char *key, const char *value);
+void cli_output_key_ivalue(cli_cmd_t *cmd, const char *key, int value);
+void cli_output_key_hvalue(cli_cmd_t *cmd, const char *key, uint32_t value);
+
+
 #ifdef __cplusplus
 }
 #endif

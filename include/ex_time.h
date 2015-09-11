@@ -14,6 +14,9 @@ extern "C" {
  }}} */
 #include <unistd.h>
 #include <time.h>
+#ifdef __linux__
+#include <sys/time.h>
+#endif
 
 #define TIME_1MS        1
 #define TIME_10MS       (10 * TIME_1MS)

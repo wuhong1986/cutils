@@ -12,6 +12,7 @@
 #include "cobj_str.h"
 #include "cobj_addr.h"
 #include "clog.h"
+#include "ex_time.h"
 
 static dev_addr_t *cli_get_node_dev_addr(cli_cmd_t *cmd)
 {
@@ -121,8 +122,12 @@ static void cli_echo(cli_cmd_t *cmd)
     free(data);
 }
 
-static Status cmd_proc_resp_txtest(cmd_t *cmd_resp)
+static Status cmd_proc_resp_txtest(const cmd_req_t *cmd_req, const cmd_t *cmd_resp)
 {
+    uint32_t *recv_cnt = (uint32_t*)cmd_req->private_data;
+
+    ++(*recv_cnt);
+
     return S_OK;
 }
 
@@ -135,17 +140,22 @@ static void cli_txtest(cli_cmd_t *cmd)
     uint8_t   *data_resp = NULL;
     uint32_t   argc = 0;
     uint32_t   i = 0;
-    uint32_t pack_size = 4 * 1024;
+    uint32_t pack_size = 128;
     bool is_sync = true;
     bool is_test = false;
     uint32_t loop_cnt = 1;
+    uint32_t recv_cnt = 0;
+    struct timeval time_start;
+    struct timeval time_end;
+    struct timeval time_cost;
 
     dev_addr = cli_get_node_dev_addr(cmd);
     if(!dev_addr){
         return;
     }
 
-    is_sync = (strcmp(cli_opt_get_str(cmd, "mode", "sync"), "async") != 0);
+    /* is_sync = (strcmp(cli_opt_get_str(cmd, "mode", "sync"), "async") != 0); */
+    /* is_sync = false; */
     is_test = cli_opt_exist(cmd, "test");
     loop_cnt = cli_opt_get_int(cmd, "loop", 1);
 
@@ -155,42 +165,67 @@ static void cli_txtest(cli_cmd_t *cmd)
         data[i] = i;
     }
 
-    log_dbg("start tx test.");
+    gettimeofday(&time_start, NULL);
 
-    loop_cnt = 500000;
+    loop_cnt = 5000;
     for(i = 0; i < loop_cnt; ++i) {
         /* printf("test %d\n", i); */
         req = cmd_new_req(dev_addr, CMD_CODE_TX_TEST);
-        /* cmd_req_set_sync(req); */
+        if(is_sync){
+            cmd_req_set_sync(req);
+        }
 
+        req->private_data = &recv_cnt;
         cmd_req_set_data(req, data, pack_size * sizeof(uint32_t));
 
         cmd_send_request(req);
 
-        /* sleep_ms(10); */
-
+        if(is_sync){
+            response = cmd_recv_sync_response(req);
+            if(!response) {
+                cli_output(cmd, "Echo timeout!\n");
+            } else if(cmd_get_error(response) != S_OK) {
+                cli_output(cmd, "Echo error, return code %d\n", cmd_get_error(response));
+            } else {
 #if 0
-        response = cmd_recv_sync_response(req);
-        if(!response) {
-            cli_output(cmd, "Echo timeout!\n");
-        } else if(cmd_get_error(response) != S_OK) {
-            cli_output(cmd, "Echo error, return code %d\n", cmd_get_error(response));
-        } else {
-            data_resp = cmd_get_data(response);
-            printf("Echo OK, response is:\n");
-            cli_output(cmd, "Echo OK, response is:\n");
-            for(i = 0; i < cmd_get_data_len(response); ++i) {
-                cli_output(cmd, " %02X", data_resp[i]);
-            }
-            cli_output(cmd, "\n");
-        }
-
-        cmd_req_free(req);
+                data_resp = cmd_get_data(response);
+                printf("Echo OK, response is:\n");
+                cli_output(cmd, "Echo OK, response is:\n");
+                for(i = 0; i < cmd_get_data_len(response); ++i) {
+                    cli_output(cmd, " %02X", data_resp[i]);
+                }
+                cli_output(cmd, "\n");
 #endif
+            }
+
+            cmd_req_free(req);
+        }
     }
 
+    int sleep_total = 0;
+    while(recv_cnt != loop_cnt && sleep_total < TIME_1S && !is_sync){
+        sleep_ms(1);
+        sleep_total += 1;
+    }
+    gettimeofday(&time_end, NULL);
+
+    timersub(&time_end, &time_start, &time_cost);
+
+    cli_output_kv_start(cmd);
+    cli_output_key_ivalue(cmd, "loop_cnt", loop_cnt);
+    cli_output_kv_sep(cmd);
+    cli_output_key_ivalue(cmd, "recv_cnt", recv_cnt);
+    cli_output_kv_sep(cmd);
+    cli_output_key_ivalue(cmd, "sleep", sleep_total);
+    cli_output_kv_sep(cmd);
+    cli_output_key_ivalue(cmd, "size", pack_size * sizeof(uint32_t));
+    cli_output_kv_sep(cmd);
+    cli_output_key_ivalue(cmd, "cost_sec", time_cost.tv_sec);
+    cli_output_kv_sep(cmd);
+    cli_output_key_ivalue(cmd, "cost_usec", time_cost.tv_usec);
+    cli_output_kv_end(cmd);
+
     free(data);
-    log_dbg("end tx test.");
 }
 
 static void cli_request(cli_cmd_t *cmd)

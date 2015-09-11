@@ -326,6 +326,7 @@ void cli_loop(void)
         printf("}\n");
 #else
         printf("%s", cstr_body(cmd.output));
+        printf("\n");
 #endif
         cli_cmd_clear(&cmd);
 	}
@@ -809,3 +810,34 @@ void  cli_release(void)
     chash_free(g_clis);
     chash_free(g_opts);
 }
+
+void cli_output_kv_start(cli_cmd_t *cmd)
+{
+    cli_output(cmd, "{");
+}
+
+void cli_output_kv_end(cli_cmd_t *cmd)
+{
+    cli_output(cmd, "}");
+}
+
+void cli_output_kv_sep(cli_cmd_t *cmd)
+{
+    cli_output(cmd, ", ");
+}
+
+void cli_output_key_value(cli_cmd_t *cmd, const char *key, const char *value)
+{
+    cli_output(cmd, "\"%s\": \"%s\"", key, value);
+}
+
+void cli_output_key_ivalue(cli_cmd_t *cmd, const char *key, int value)
+{
+    cli_output(cmd, "\"%s\": %d", key, value);
+}
+
+void cli_output_key_hvalue(cli_cmd_t *cmd, const char *key, uint32_t value)
+{
+    cli_output(cmd, "\"%s\": 0x%08X", key, value);
+}
+

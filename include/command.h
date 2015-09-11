@@ -63,7 +63,8 @@ typedef enum cmd_error_e
     CMD_E_OK          = 0,
     CMD_E_NO_ROUTINE  = 1,
     CMD_E_TIMEOUT     = 13,
-    CMD_E_SEND_FAILED = 4
+    CMD_E_SEND_FAILED = 4,
+    CMD_E_OTHER = 31,
 }cmd_error_t;
 
 typedef enum cmd_router_e

@@ -64,7 +64,7 @@ static csem  *g_sem_recv_cnt  = NULL;
 static csem  *g_sem_recv = NULL;
 static clist *g_cmd_list_recv[CMD_PRIOR_CNT];
 
-static Status cmd_request_list_remove(const cmd_t *cmd_resp);
+static cmd_req_t* cmd_request_list_pop(const cmd_t *cmd_resp);
 
 static uint32_t cmd_head_common_get_size(const void *head2)
 {
@@ -162,10 +162,12 @@ static inline void cmd_req_do_free(cmd_req_t *cmd_req)
 
 void cmd_req_free(cmd_req_t *cmd_req)
 {
+    /* free otherwher */
+
+    ex_assert(CMD_REQ_TYPE_SYNC == cmd_get_req_type(&(cmd_req->cmd)));
+    /* cmd_req_t  */
     if(CMD_REQ_TYPE_SYNC == cmd_get_req_type(&(cmd_req->cmd))){
-        if(S_OK != cmd_request_list_remove(&(cmd_req->cmd))) {
-            cmd_req_do_free(cmd_req);
-        }
+        cmd_req_do_free(cmd_req);
     }
 }
 
@@ -471,7 +473,7 @@ static bool cmd_equal(const cmd_t *cmd1, const cmd_t *cmd2)
  *
  * @Returns   ERR_CMD_NO_SUCH_REQ_CMD: 不存在该请求命令，或者已经进行超时处理了
  */
-static Status cmd_request_list_remove(const cmd_t *cmd_resp)
+static cmd_req_t* cmd_request_list_pop(const cmd_t *cmd_resp)
 {
     cmd_req_t *req   = NULL;
     bool      bExist = false;
@@ -483,21 +485,16 @@ static Status cmd_request_list_remove(const cmd_t *cmd_resp)
     iter = clist_begin(g_cmd_list_req);
     clist_iter_foreach_obj(&iter, req){
         if(cmd_equal(&(req->cmd), cmd_resp)){
-            clist_remove(&iter);
-            bExist = true;
-
+            clist_pop(&iter);
             break;
         }
-    }
 
-    if(!bExist){
-        /*  消息已经超时处理了，在超时后接收到应答信息 */
-        ret = ERR_CMD_NO_SUCH_REQ_CMD;
+        req = NULL;
     }
 
     cmd_list_req_unlock();
 
-    return ret;
+    return req;
 }
 
 cmd_t* cmd_recv_sync_response(cmd_req_t *req)
@@ -546,6 +543,7 @@ static Status cmd_process_recv_resp_async(cmd_recv_t *cmd_recv)/*{{{*/
     Status        ret      = S_OK;
     uint32_t      cmd_code = 0;
     cmd_t         *cmd     = NULL;
+    cmd_req_t     *cmd_req = NULL;
 
     cmd = cmd_recv->cmd;
     cmd_code = cmd_get_code(cmd);
@@ -554,8 +552,8 @@ static Status cmd_process_recv_resp_async(cmd_recv_t *cmd_recv)/*{{{*/
     /*         dev_addr_get_name(cmd->dev_addr), cmd_code, cmd_get_id(cmd)); */
 
     /*  接收到应答, 从管理链表中删除之前的请求命令 */
-    ret = cmd_request_list_remove(cmd);
-    if(ret != S_OK){
+    cmd_req = cmd_request_list_pop(cmd);
+    if(!cmd_req){
         /*  1. 该请求已经超时了，在请求列表中没有找到请求，不处理, 丢弃该应答命令
          *  2. 数据应答方对数据进行重发，重复接收，之前已经删除了该请求命令
          *  3. 数据请求方对请求进行重发，对方重复应答
@@ -571,8 +569,10 @@ static Status cmd_process_recv_resp_async(cmd_recv_t *cmd_recv)/*{{{*/
         log_dbg("cmd code:%d can't find process routine!", cmd_code);
         ret = ERR_CMD_ROUTINE_NOT_FOUND; /*  没有注册该命令 */
     } else if(routine->callback_resp) {
-        ret = routine->callback_resp(cmd);
+        ret = routine->callback_resp(cmd_req, cmd);
     }
+
+    cmd_req_do_free(cmd_req);
 
     return ret;
 }/*}}}*/
@@ -1681,7 +1681,7 @@ static void cli_remote(const cli_arg_t *arg, cstr *cli_str)
 }
 #endif
 
-void cmd_proc_echo(const cmd_t *cmd_req, cmd_t *cmd_resp)
+static void cmd_proc_echo(const cmd_t *cmd_req, cmd_t *cmd_resp)
 {
     uint32_t data_len = cmd_get_data_len(cmd_req);
     uint32_t i = 0;
@@ -1696,6 +1696,11 @@ void cmd_proc_echo(const cmd_t *cmd_req, cmd_t *cmd_resp)
 
     cmd_set_data(cmd_resp, data_resp, data_len);
     free(data_resp);
+}
+
+static void cmd_proc_txtest(const cmd_t *cmd_req, cmd_t *cmd_resp)
+{
+
 }
 
 void cmd_init(void)
@@ -1730,7 +1735,7 @@ void cmd_init(void)
     cmd_routine_regist_resp(CMD_CODE_CLI, cmd_process_cli_resp, NULL);
 #endif
     cmd_routine_regist_req(CMD_CODE_PING, NULL);
-    cmd_routine_regist_req(CMD_CODE_TX_TEST, NULL);
+    cmd_routine_regist_req(CMD_CODE_TX_TEST, cmd_proc_txtest);
     cmd_routine_regist_req(CMD_CODE_ECHO, cmd_proc_echo);
 
     thread_new("cmd_recv",     cmd_recv_proc_thread_fun, NULL);

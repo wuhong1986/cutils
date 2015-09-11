@@ -18,7 +18,9 @@ extern "C" {
 #include "command_typedef.h"
 
 struct cmd_s;
-typedef Status (*cmd_callback_resp)(struct cmd_s *cmd);
+struct cmd_req_s;
+typedef Status (*cmd_callback_resp)(const struct cmd_req_s *cmd_req,
+                                    const struct cmd_s *cmd_resp);
 typedef Status (*cmd_callback_ot)(struct cmd_s *cmd);
 typedef void   (*cmd_callback_req)(const struct cmd_s *cmd_req, struct cmd_s *cmd_resp);
 
