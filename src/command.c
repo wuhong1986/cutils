@@ -786,8 +786,9 @@ inline static void cmd_req_list_add(cmd_req_t *cmd_req)
     cmd_list_req_unlock();
 }
 
-static void cmd_req_node_set_sent(cmd_req_t *req)
+inline static void cmd_req_node_set_sent(cmd_req_t *req)
 {
+#if 0
     cmd_req_t *req_find = NULL;
 
     cmd_list_req_lock();
@@ -799,13 +800,15 @@ static void cmd_req_node_set_sent(cmd_req_t *req)
     }
 
     cmd_list_req_unlock();
+#else
+    req->is_sent = true;
+#endif
 }
 
-static void cmd_req_node_delete(cmd_req_t *req)
+inline static void cmd_req_node_delete(cmd_req_t *req)
 {
     cmd_list_req_lock();
 
-    log_dbg("cmd req list delete node");
     clist_find_then_remove(g_cmd_list_req, req);
 
     cmd_list_req_unlock();

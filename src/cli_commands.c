@@ -140,7 +140,7 @@ static void cli_txtest(cli_cmd_t *cmd)
     uint8_t   *data_resp = NULL;
     uint32_t   argc = 0;
     uint32_t   i = 0;
-    uint32_t pack_size = 128;
+    uint32_t pack_size = 1000;
     bool is_sync = true;
     bool is_test = false;
     uint32_t loop_cnt = 1;
@@ -155,7 +155,7 @@ static void cli_txtest(cli_cmd_t *cmd)
     }
 
     /* is_sync = (strcmp(cli_opt_get_str(cmd, "mode", "sync"), "async") != 0); */
-    /* is_sync = false; */
+    is_sync = false;
     is_test = cli_opt_exist(cmd, "test");
     loop_cnt = cli_opt_get_int(cmd, "loop", 1);
 
@@ -203,7 +203,8 @@ static void cli_txtest(cli_cmd_t *cmd)
     }
 
     int sleep_total = 0;
-    while(recv_cnt != loop_cnt && sleep_total < TIME_1S && !is_sync){
+    /* while(recv_cnt != loop_cnt && sleep_total < TIME_1S * 3 && !is_sync){ */
+    while(recv_cnt != loop_cnt && !is_sync){
         sleep_ms(1);
         sleep_total += 1;
     }
@@ -220,9 +221,29 @@ static void cli_txtest(cli_cmd_t *cmd)
     cli_output_kv_sep(cmd);
     cli_output_key_ivalue(cmd, "size", pack_size * sizeof(uint32_t));
     cli_output_kv_sep(cmd);
-    cli_output_key_ivalue(cmd, "cost_sec", time_cost.tv_sec);
+
+    int cost = time_cost.tv_sec * 1000 + time_cost.tv_usec / 1000;
+    cli_output_key_ivalue(cmd, "cost", cost);
     cli_output_kv_sep(cmd);
-    cli_output_key_ivalue(cmd, "cost_usec", time_cost.tv_usec);
+    cli_output_key_value(cmd, "cost unit", "ms");
+    cli_output_kv_sep(cmd);
+
+    double speed = loop_cnt * pack_size * sizeof(uint32_t) * 1000.0 / cost;
+
+    if(speed < 1024){
+        cli_output_key_fvalue(cmd, "speed", speed);
+        cli_output_kv_sep(cmd);
+        cli_output_key_value(cmd, "speed unit", "B/s");
+    } else if(speed < 1024 * 1024) {
+        cli_output_key_fvalue(cmd, "speed", speed / 1024);
+        cli_output_kv_sep(cmd);
+        cli_output_key_value(cmd, "speed unit", "KB/s");
+    } else {
+        cli_output_key_fvalue(cmd, "speed", speed / 1024 / 1024);
+        cli_output_kv_sep(cmd);
+        cli_output_key_value(cmd, "speed unit", "MB/s");
+    }
+
     cli_output_kv_end(cmd);
 
     free(data);

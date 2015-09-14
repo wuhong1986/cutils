@@ -836,6 +836,11 @@ void cli_output_key_ivalue(cli_cmd_t *cmd, const char *key, int value)
     cli_output(cmd, "\"%s\": %d", key, value);
 }
 
+void cli_output_key_fvalue(cli_cmd_t *cmd, const char *key, double value)
+{
+    cli_output(cmd, "\"%s\": %g", key, value);
+}
+
 void cli_output_key_hvalue(cli_cmd_t *cmd, const char *key, uint32_t value)
 {
     cli_output(cmd, "\"%s\": 0x%08X", key, value);

@@ -18,6 +18,9 @@
 #include "dev_addr_mgr.h"
 #include "dev_router.h"
 
+/* #define TEST_CLIENT */
+#define TEST_SERVER
+
 int main(int argc, char *argv[])
 {
     cli_init();
@@ -37,6 +40,7 @@ int main(int argc, char *argv[])
 
     dev_router_set_mac_local(0x89ABCDE0);
 
+#ifdef TEST_CLIENT
     ex_memzero_one(&msg);
     strcpy(msg.dev_name, "1004");
     msg.router_list_lens[0] = 3;
@@ -86,12 +90,17 @@ int main(int argc, char *argv[])
     msg.network_nodes[6].subnet_cnt = 4;
     msg.network_nodes[6].network_type = NETWORK_TYPE_ROUTER;
     strcpy(msg.network_nodes[6].dev_name, "1007");
+#endif
 
     socket_listen_async(50002);
     socket_listen_cli(49999);
     socket_recv_start();
+#ifdef TEST_SERVER
     socket_bc_tx_start("test", 50000, 50001, 50002);
+#endif
+#ifdef TEST_CLIENT
     socket_bc_rx_start("test", 50000, 50001, &msg);
+#endif
 
 #if 0
     cstr *json = cstr_new();
